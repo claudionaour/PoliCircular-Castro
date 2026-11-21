@@ -295,7 +295,9 @@ export async function acceptMatchRequestRpc(requestId: string): Promise<string> 
   const notifReqId = `notif_req_${requestId}`;
   const notifOwnerId = `notif_own_${requestId}`;
 
-  const achievementsSnap = await getDocs(collection(db, 'achievements')).catch(() => null);
+  const achievementsSnap = await getDocs(
+    query(collection(db, 'achievements'), where('required_operations', '>=', 1))
+  ).catch(() => null);
 
   try {
     const txResult = await runTransaction(db, async (tx) => {
@@ -625,20 +627,37 @@ async function hydrateMatchDocs(
 ): Promise<MatchRecord[]> {
   if (matchDocs.length === 0) return [];
 
+  const currentUid = auth.currentUser?.uid;
   const productIds: string[] = [];
   const userIds: string[] = [];
-  const matchIds: string[] = [];
+  const matchIdSet = new Set<string>();
+  const nonParticipantMatchIds: string[] = [];
 
   matchDocs.forEach((d) => {
     const data = d.data();
-    matchIds.push(d.id);
+    matchIdSet.add(d.id);
     if (data.target_product_id) productIds.push(String(data.target_product_id));
     if (data.offered_product_id) productIds.push(String(data.offered_product_id));
-    if (data.owner_id) userIds.push(String(data.owner_id));
-    if (data.requester_id) userIds.push(String(data.requester_id));
+    const ownerId = data.owner_id ? String(data.owner_id) : '';
+    const requesterId = data.requester_id ? String(data.requester_id) : '';
+    if (ownerId) userIds.push(ownerId);
+    if (requesterId) userIds.push(requesterId);
+    if (!currentUid || (ownerId !== currentUid && requesterId !== currentUid)) {
+      nonParticipantMatchIds.push(d.id);
+    }
   });
 
-  const [maps, profiles, images, productSnaps, convSnaps, exSnaps] = await Promise.all([
+  const [
+    maps,
+    profiles,
+    images,
+    productSnaps,
+    myConvSnaps,
+    myExSnaps,
+    myConfSnaps,
+    modConvSnaps,
+    modExSnaps,
+  ] = await Promise.all([
     fetchLookupMaps(),
     fetchProfilesMap(userIds),
     fetchImagesByProductIds(productIds),
@@ -647,15 +666,45 @@ async function hydrateMatchDocs(
         getDoc(doc(db, 'products', pid)).catch(() => null)
       )
     ),
+    currentUid
+      ? Promise.all([
+          getDocs(
+            query(collection(db, 'conversations'), where('participant_a', '==', currentUid))
+          ).catch(() => null),
+          getDocs(
+            query(collection(db, 'conversations'), where('participant_b', '==', currentUid))
+          ).catch(() => null),
+        ])
+      : Promise.resolve([null, null]),
+    currentUid
+      ? Promise.all([
+          getDocs(query(collection(db, 'exchanges'), where('owner_id', '==', currentUid))).catch(
+            () => null
+          ),
+          getDocs(
+            query(collection(db, 'exchanges'), where('requester_id', '==', currentUid))
+          ).catch(() => null),
+        ])
+      : Promise.resolve([null, null]),
+    currentUid
+      ? Promise.all([
+          getDocs(
+            query(collection(db, 'exchange_confirmations'), where('owner_id', '==', currentUid))
+          ).catch(() => null),
+          getDocs(
+            query(collection(db, 'exchange_confirmations'), where('requester_id', '==', currentUid))
+          ).catch(() => null),
+        ])
+      : Promise.resolve([null, null]),
     Promise.all(
-      matchIds.map((mid) =>
+      nonParticipantMatchIds.map((mid) =>
         getDocs(query(collection(db, 'conversations'), where('match_id', '==', mid))).catch(
           () => null
         )
       )
     ),
     Promise.all(
-      matchIds.map((mid) =>
+      nonParticipantMatchIds.map((mid) =>
         getDocs(query(collection(db, 'exchanges'), where('match_id', '==', mid))).catch(
           () => null
         )
@@ -673,75 +722,104 @@ async function hydrateMatchDocs(
     }
   });
 
-  const convByMatch = new Map<string, Conversation[]>();
-  convSnaps.forEach((snap) => {
+  const convDocMap = new Map<string, { id: string; data: () => Record<string, unknown> }>();
+  [...myConvSnaps, ...modConvSnaps].forEach((snap) => {
     snap?.docs.forEach((cDoc) => {
-      const d = cDoc.data();
-      const mid = String(d.match_id || '');
-      const list = convByMatch.get(mid) ?? [];
-      list.push({
-        id: cDoc.id,
-        match_id: mid,
-        participant_a: String(d.participant_a || ''),
-        participant_b: String(d.participant_b || ''),
-        is_blocked: Boolean(d.is_blocked),
-        blocked_by: d.blocked_by ? String(d.blocked_by) : null,
-        created_at: toIsoString(d.created_at),
-      });
-      convByMatch.set(mid, list);
+      if (matchIdSet.has(String(cDoc.data().match_id || ''))) {
+        convDocMap.set(cDoc.id, cDoc);
+      }
     });
   });
 
-  const allExchangeIds: string[] = [];
-  const exByMatch = new Map<string, ExchangeRecord[]>();
-  exSnaps.forEach((snap) => {
+  const convByMatch = new Map<string, Conversation[]>();
+  convDocMap.forEach((cDoc) => {
+    const d = cDoc.data();
+    const mid = String(d.match_id || '');
+    const list = convByMatch.get(mid) ?? [];
+    list.push({
+      id: cDoc.id,
+      match_id: mid,
+      participant_a: String(d.participant_a || ''),
+      participant_b: String(d.participant_b || ''),
+      is_blocked: Boolean(d.is_blocked),
+      blocked_by: d.blocked_by ? String(d.blocked_by) : null,
+      created_at: toIsoString(d.created_at),
+    });
+    convByMatch.set(mid, list);
+  });
+
+  const exDocMap = new Map<string, { id: string; data: () => Record<string, unknown> }>();
+  [...myExSnaps, ...modExSnaps].forEach((snap) => {
     snap?.docs.forEach((eDoc) => {
-      const d = eDoc.data();
-      const mid = String(d.match_id || '');
-      allExchangeIds.push(eDoc.id);
-      const list = exByMatch.get(mid) ?? [];
-      list.push({
-        id: eDoc.id,
-        match_id: mid,
-        status: d.status,
-        proposed_date: d.proposed_date ? String(d.proposed_date) : null,
-        proposed_time_slot: d.proposed_time_slot ? String(d.proposed_time_slot) : null,
-        meeting_point_label: d.meeting_point_label ? String(d.meeting_point_label) : null,
-        meeting_point_lat: typeof d.meeting_point_lat === 'number' ? d.meeting_point_lat : null,
-        meeting_point_lng: typeof d.meeting_point_lng === 'number' ? d.meeting_point_lng : null,
-        proposed_by: d.proposed_by ? String(d.proposed_by) : null,
-        cancelled_by: d.cancelled_by ? String(d.cancelled_by) : null,
-        cancellation_reason: d.cancellation_reason ? String(d.cancellation_reason) : null,
-        completed_at: toNullableIsoString(d.completed_at),
-        created_at: toIsoString(d.created_at),
-        exchange_confirmations: [],
-      });
-      exByMatch.set(mid, list);
+      if (matchIdSet.has(String(eDoc.data().match_id || ''))) {
+        exDocMap.set(eDoc.id, eDoc);
+      }
+    });
+  });
+
+  const nonParticipantExIds: string[] = [];
+  const exByMatch = new Map<string, ExchangeRecord[]>();
+  exDocMap.forEach((eDoc) => {
+    const d = eDoc.data();
+    const mid = String(d.match_id || '');
+    if (
+      !currentUid ||
+      (String(d.owner_id || '') !== currentUid && String(d.requester_id || '') !== currentUid)
+    ) {
+      nonParticipantExIds.push(eDoc.id);
+    }
+    const list = exByMatch.get(mid) ?? [];
+    list.push({
+      id: eDoc.id,
+      match_id: mid,
+      status: d.status as ExchangeRecord['status'],
+      proposed_date: d.proposed_date ? String(d.proposed_date) : null,
+      proposed_time_slot: d.proposed_time_slot ? String(d.proposed_time_slot) : null,
+      meeting_point_label: d.meeting_point_label ? String(d.meeting_point_label) : null,
+      meeting_point_lat: typeof d.meeting_point_lat === 'number' ? d.meeting_point_lat : null,
+      meeting_point_lng: typeof d.meeting_point_lng === 'number' ? d.meeting_point_lng : null,
+      proposed_by: d.proposed_by ? String(d.proposed_by) : null,
+      cancelled_by: d.cancelled_by ? String(d.cancelled_by) : null,
+      cancellation_reason: d.cancellation_reason ? String(d.cancellation_reason) : null,
+      completed_at: toNullableIsoString(d.completed_at),
+      created_at: toIsoString(d.created_at),
+      exchange_confirmations: [],
+    });
+    exByMatch.set(mid, list);
+  });
+
+  const modConfSnaps = await Promise.all(
+    nonParticipantExIds.map((exId) =>
+      getDocs(
+        query(collection(db, 'exchange_confirmations'), where('exchange_id', '==', exId))
+      ).catch(() => null)
+    )
+  );
+
+  const confDocMap = new Map<string, { id: string; data: () => Record<string, unknown> }>();
+  [...myConfSnaps, ...modConfSnaps].forEach((snap) => {
+    snap?.docs.forEach((cDoc) => {
+      const exId = String(cDoc.data().exchange_id || '');
+      if (exDocMap.has(exId)) {
+        confDocMap.set(cDoc.id, cDoc);
+      }
     });
   });
 
   const confByEx = new Map<string, ExchangeConfirmation[]>();
-  await Promise.all(
-    allExchangeIds.map(async (exId) => {
-      const cSnap = await getDocs(
-        query(collection(db, 'exchange_confirmations'), where('exchange_id', '==', exId))
-      ).catch(() => null);
-      if (!cSnap) return;
-      confByEx.set(
-        exId,
-        cSnap.docs.map((c) => {
-          const cd = c.data();
-          return {
-            id: c.id,
-            exchange_id: String(cd.exchange_id || exId),
-            user_id: String(cd.user_id || ''),
-            confirmed_at: toIsoString(cd.confirmed_at),
-            notes: cd.notes ? String(cd.notes) : null,
-          };
-        })
-      );
-    })
-  );
+  confDocMap.forEach((c) => {
+    const cd = c.data();
+    const exId = String(cd.exchange_id || '');
+    const list = confByEx.get(exId) ?? [];
+    list.push({
+      id: c.id,
+      exchange_id: exId,
+      user_id: String(cd.user_id || ''),
+      confirmed_at: toIsoString(cd.confirmed_at),
+      notes: cd.notes ? String(cd.notes) : null,
+    });
+    confByEx.set(exId, list);
+  });
 
   exByMatch.forEach((list) => {
     list.forEach((ex) => {
@@ -794,10 +872,34 @@ export async function listUserMatches(userId: string): Promise<MatchRecord[]> {
 
 export async function getMatchDetail(matchId: string): Promise<MatchRecord | null> {
   try {
-    const snap = await getDoc(doc(db, 'matches', matchId));
-    if (!snap.exists()) return null;
-    const hydrated = await hydrateMatchDocs([snap]);
-    return hydrated[0] ?? null;
+    const snap = await getDoc(doc(db, 'matches', matchId)).catch(() => null);
+    if (snap?.exists()) {
+      const hydrated = await hydrateMatchDocs([snap]);
+      return hydrated[0] ?? null;
+    }
+
+    // Respaldo para enlaces /matches/match_{requestId} o IDs legados del usuario autenticado
+    const currentUid = auth.currentUser?.uid;
+    if (currentUid) {
+      const reqIdCandidate = matchId.startsWith('match_') ? matchId.slice(6) : matchId;
+      const [asOwnerSnap, asRequesterSnap] = await Promise.all([
+        getDocs(query(collection(db, 'matches'), where('owner_id', '==', currentUid))),
+        getDocs(query(collection(db, 'matches'), where('requester_id', '==', currentUid))),
+      ]);
+      const fallbackDoc =
+        asOwnerSnap.docs.find(
+          (d) => d.id === matchId || String(d.data().request_id || '') === reqIdCandidate
+        ) ??
+        asRequesterSnap.docs.find(
+          (d) => d.id === matchId || String(d.data().request_id || '') === reqIdCandidate
+        );
+      if (fallbackDoc) {
+        const hydrated = await hydrateMatchDocs([fallbackDoc]);
+        return hydrated[0] ?? null;
+      }
+    }
+
+    return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `matches/${matchId}`);
   }

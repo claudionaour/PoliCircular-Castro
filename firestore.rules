@@ -782,10 +782,20 @@ service cloud.firestore {
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(conversationId)
         && isValidConversation(incoming(), conversationId)
+        && incoming().participant_a != incoming().participant_b
         && (incoming().participant_a == request.auth.uid || incoming().participant_b == request.auth.uid)
         && incoming().is_blocked == false
         && incoming().created_at == request.time
-        && existsAfter(/databases/$(database)/documents/matches/$(incoming().match_id));
+        && existsAfter(/databases/$(database)/documents/matches/$(incoming().match_id))
+        && (
+          (
+            getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.owner_id == incoming().participant_a
+            && getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.requester_id == incoming().participant_b
+          ) || (
+            getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.owner_id == incoming().participant_b
+            && getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.requester_id == incoming().participant_a
+          )
+        );
       allow update: if isVerifiedUser() && isValidId(conversationId)
         && isValidConversation(incoming(), conversationId)
         && (isOwner(existing().participant_a) || isOwner(existing().participant_b))

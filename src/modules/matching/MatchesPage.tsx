@@ -292,15 +292,18 @@ export const MatchesPage: React.FC = () => {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {req.status === 'accepted' && (
-                    <Link
-                      to={`/matches/match_${req.id}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-[#102C49] text-xs font-semibold hover:bg-slate-100"
-                    >
-                      <MessageSquare className="h-3.5 w-3.5" />
-                      <span>Abrir chat</span>
-                    </Link>
-                  )}
+                  {req.status === 'accepted' && (() => {
+                    const linkedMatch = matches.find((m) => m.request_id === req.id);
+                    return (
+                      <Link
+                        to={`/matches/${linkedMatch ? linkedMatch.id : `match_${req.id}`}`}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-[#102C49] text-xs font-semibold hover:bg-slate-100"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        <span>Abrir chat</span>
+                      </Link>
+                    );
+                  })()}
                   {req.status === 'pending' && (
                     <button
                       type="button"

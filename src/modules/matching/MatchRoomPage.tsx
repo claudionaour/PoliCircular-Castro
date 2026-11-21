@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { getMatchDetail } from '../../services/matchingService';
 import {
+  ensureConversationForMatch,
   listMessages,
   markConversationMessagesRead,
   sendMessage,
@@ -50,6 +51,7 @@ export const MatchRoomPage: React.FC = () => {
   const loadData = useCallback(async () => {
     if (!matchId || !user) return;
     setLoading(true);
+    setError(null);
     try {
       const [m, revIds] = await Promise.all([
         getMatchDetail(matchId),
@@ -58,12 +60,23 @@ export const MatchRoomPage: React.FC = () => {
       setMatch(m);
       const exId = m?.exchanges?.[0]?.id;
       setHasReviewed(Boolean(exId && revIds.includes(exId)));
-      const conv = m?.conversations?.[0] ?? null;
+
+      let conv = m?.conversations?.[0] ?? null;
+      if (m && !conv && (m.owner_id === user.uid || m.requester_id === user.uid)) {
+        conv = await ensureConversationForMatch(m, user.uid);
+      }
       setConversation(conv);
+
       if (conv) {
-        const msgs = await listMessages(conv.id);
+        const role =
+          conv.participant_a === user.uid
+            ? 'participant_a'
+            : conv.participant_b === user.uid
+              ? 'participant_b'
+              : undefined;
+        const msgs = await listMessages(conv.id, user.uid, role);
         setMessages(msgs);
-        await markConversationMessagesRead(conv.id, user.uid);
+        await markConversationMessagesRead(conv.id, user.uid, role).catch(() => {});
       }
     } catch (err) {
       setError(translateFirebaseError(err));
@@ -78,6 +91,14 @@ export const MatchRoomPage: React.FC = () => {
 
   const conversationId = conversation?.id;
   const userId = user?.uid;
+  const participantRole =
+    conversation && userId
+      ? conversation.participant_a === userId
+        ? 'participant_a'
+        : conversation.participant_b === userId
+          ? 'participant_b'
+          : undefined
+      : undefined;
 
   useEffect(() => {
     if (!conversationId || !userId) return;
@@ -92,18 +113,19 @@ export const MatchRoomPage: React.FC = () => {
           );
         });
         if (incoming.sender_id !== userId) {
-          markConversationMessagesRead(conversationId, userId).catch(() => {});
+          markConversationMessagesRead(conversationId, userId, participantRole).catch(() => {});
         }
       },
       (updated) => {
         setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
-      }
+      },
+      { userId, participantRole }
     );
 
     return () => {
       channel.unsubscribe();
     };
-  }, [conversationId, userId]);
+  }, [conversationId, userId, participantRole]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -154,9 +176,12 @@ export const MatchRoomPage: React.FC = () => {
 
   if (!match || !conversation) {
     return (
-      <div className="rounded-2xl bg-[#102C49] border border-[#244B73] p-8 text-center">
-        <p className="font-display font-bold text-white">Conversación no encontrada o no autorizada</p>
-        <Link to="/matches" className="mt-3 inline-block text-sm font-semibold text-[#FFA94D]">
+      <div className="rounded-2xl bg-[#102C49] border border-[#244B73] p-8 text-center space-y-3">
+        <p className="font-display font-bold text-white">
+          {error ? 'No pudimos abrir el chat en este momento' : 'Conversación no encontrada o no autorizada'}
+        </p>
+        {error && <p className="text-xs text-red-200">{error}</p>}
+        <Link to="/matches" className="mt-2 inline-block text-sm font-semibold text-[#FFA94D]">
           Volver a Mis Match
         </Link>
       </div>

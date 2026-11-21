@@ -67,7 +67,7 @@ export async function listUserExchanges(userId: string): Promise<ExchangeRecord[
       if (md.requester_id) userIds.push(String(md.requester_id));
     });
 
-    const [maps, profiles, images, productSnaps, confSnaps] = await Promise.all([
+    const [maps, profiles, images, productSnaps, confOwnerSnap, confReqSnap] = await Promise.all([
       fetchLookupMaps(),
       fetchProfilesMap(userIds),
       fetchImagesByProductIds(productIds),
@@ -76,13 +76,12 @@ export async function listUserExchanges(userId: string): Promise<ExchangeRecord[
           getDoc(doc(db, 'products', pid)).catch(() => null)
         )
       ),
-      Promise.all(
-        exDocs.map((eDoc) =>
-          getDocs(
-            query(collection(db, 'exchange_confirmations'), where('exchange_id', '==', eDoc.id))
-          ).catch(() => null)
-        )
-      ),
+      getDocs(
+        query(collection(db, 'exchange_confirmations'), where('owner_id', '==', userId))
+      ).catch(() => null),
+      getDocs(
+        query(collection(db, 'exchange_confirmations'), where('requester_id', '==', userId))
+      ).catch(() => null),
     ]);
 
     const productMap = new Map<string, Product>();
@@ -119,20 +118,24 @@ export async function listUserExchanges(userId: string): Promise<ExchangeRecord[
       });
     });
 
+    const confDocMap = new Map<string, { id: string; data: () => Record<string, unknown> }>();
+    [confOwnerSnap, confReqSnap].forEach((snap) => {
+      snap?.docs.forEach((c) => confDocMap.set(c.id, c));
+    });
+
     const confByExchange = new Map<string, ExchangeConfirmation[]>();
-    confSnaps.forEach((snap, idx) => {
-      const exId = exDocs[idx].id;
-      const list =
-        snap?.docs.map((c) => {
-          const cd = c.data();
-          return {
-            id: c.id,
-            exchange_id: String(cd.exchange_id || exId),
-            user_id: String(cd.user_id || ''),
-            confirmed_at: toIsoString(cd.confirmed_at),
-            notes: cd.notes ? String(cd.notes) : null,
-          };
-        }) ?? [];
+    confDocMap.forEach((c) => {
+      const cd = c.data();
+      const exId = String(cd.exchange_id || '');
+      if (!exMap.has(exId)) return;
+      const list = confByExchange.get(exId) ?? [];
+      list.push({
+        id: c.id,
+        exchange_id: exId,
+        user_id: String(cd.user_id || ''),
+        confirmed_at: toIsoString(cd.confirmed_at),
+        notes: cd.notes ? String(cd.notes) : null,
+      });
       confByExchange.set(exId, list);
     });
 
@@ -213,7 +216,9 @@ export async function confirmExchangeDeliveryRpc(params: {
   const exchangeRef = doc(db, 'exchanges', params.exchangeId);
 
   // Pre-cargar catálogo de logros fuera de la tx (las reglas validan exists en achievements)
-  const achievementsSnap = await getDocs(collection(db, 'achievements'));
+  const achievementsSnap = await getDocs(
+    query(collection(db, 'achievements'), where('required_operations', '>=', 1))
+  ).catch(() => ({ empty: true, docs: [] as never[] }));
 
   try {
     const finalStatus = await runTransaction(db, async (tx) => {
