@@ -128,7 +128,7 @@ export function translateFirebaseError(err: unknown): string {
     const parsed = JSON.parse(raw) as FirestoreErrorInfo;
     if (parsed?.error) {
       if (parsed.error.includes('permission-denied') || parsed.error.includes('Missing or insufficient permissions')) {
-        return 'No tienes permisos suficientes o falta verificar tu correo electrónico para realizar esta acción.';
+        return 'No tienes los permisos suficientes para realizar esta acción.';
       }
       return parsed.error;
     }

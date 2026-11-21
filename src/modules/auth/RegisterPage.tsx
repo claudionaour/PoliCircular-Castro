@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, ShieldAlert, UserPlus } from 'lucide-react';
+import { ShieldAlert, UserPlus } from 'lucide-react';
 import { registerUser, signInWithGoogle } from '../../services/authService';
 import { listActiveCommunes, listSectorsByCommune } from '../../services/territorialService';
 import { isFirebaseConfigured, translateFirebaseError } from '../../services/firebase';
@@ -67,7 +67,6 @@ export const RegisterPage: React.FC = () => {
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
   const [googleBusy, setGoogleBusy] = useState(false);
 
   const {
@@ -155,7 +154,7 @@ export const RegisterPage: React.FC = () => {
         isMinorSupervised: values.isMinorSupervised,
         guardianAuthorizationNote: values.guardianAuthorizationNote,
       });
-      setRegisteredEmail(values.email);
+      navigate('/perfil', { replace: true });
     } catch (err) {
       setServerError(translateFirebaseError(err));
     }
@@ -173,28 +172,6 @@ export const RegisterPage: React.FC = () => {
       setGoogleBusy(false);
     }
   };
-
-  if (registeredEmail) {
-    return (
-      <div className="max-w-lg mx-auto px-4 py-12">
-        <div className="rounded-2xl border border-[#34D399]/40 bg-[#102C49] p-8 text-center space-y-4">
-          <CheckCircle2 className="h-12 w-12 text-[#6EE7B7] mx-auto" />
-          <h1 className="font-display text-2xl font-bold text-white">
-            Verifica tu correo electrónico
-          </h1>
-          <p className="text-sm text-slate-200 leading-relaxed">
-            Enviamos un enlace de verificación a <strong className="text-white">{registeredEmail}</strong>. Una vez confirmado tu correo podrás iniciar sesión, completar tu perfil y publicar en PoliCircular.
-          </p>
-          <Link
-            to="/iniciar-sesion"
-            className="inline-block px-6 py-3 rounded-xl bg-[#F28C28] text-[#0B1E33] text-sm font-bold hover:bg-[#FFA242]"
-          >
-            Ir a iniciar sesión
-          </Link>
-        </div>
-      </div>
-    );
-  }
 
   const isNativeAndroid = Capacitor.isNativePlatform();
 

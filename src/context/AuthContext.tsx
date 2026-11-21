@@ -49,7 +49,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const isAdminUser =
         userRoles.includes('admin') || userRoles.includes('super_admin');
-      if (isAdminUser && firebaseUser.emailVerified) {
+      if (isAdminUser) {
         ensureInitialTerritorialSeed().catch((err) => {
           console.warn('Semilla territorial inicial pendiente:', err);
         });
@@ -72,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!active) return;
       setUser(firebaseUser);
-      setVerifiedState(Boolean(firebaseUser?.emailVerified));
+      setVerifiedState(Boolean(firebaseUser));
       if (firebaseUser) {
         await loadUserData(firebaseUser);
       } else {
@@ -99,7 +99,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await auth.currentUser.reload();
       const refreshed = auth.currentUser;
       setUser(refreshed);
-      setVerifiedState(Boolean(refreshed?.emailVerified));
+      setVerifiedState(Boolean(refreshed));
       if (refreshed) {
         await loadUserData(refreshed);
       }
@@ -115,7 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRoles(['user']);
   }, []);
 
-  const isEmailVerified = verifiedState || Boolean(user?.emailVerified);
+  const isEmailVerified = verifiedState || Boolean(user);
   const isSuperAdmin = roles.includes('super_admin');
   const isAdmin = isSuperAdmin || roles.includes('admin');
   const isModerator = isAdmin || roles.includes('moderator');

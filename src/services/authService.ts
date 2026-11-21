@@ -207,20 +207,11 @@ export async function registerUser(payload: RegisterPayload) {
     guardianAuthorizationNote: payload.guardianAuthorizationNote,
   });
 
-  await sendEmailVerification(firebaseUser, {
-    url: `${getAuthContinueBaseUrl()}iniciar-sesion`,
-  });
-
   return { user: firebaseUser };
 }
 
 export async function signInUser(email: string, password: string) {
   const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
-  if (!credential.user.emailVerified) {
-    throw new Error(
-      'Tu correo aún no ha sido verificado. Revisa tu bandeja de entrada o reenvía el correo de verificación.'
-    );
-  }
   await ensureBootstrapProfile(credential.user);
   return { user: credential.user };
 }

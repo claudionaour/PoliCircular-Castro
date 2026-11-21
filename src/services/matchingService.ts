@@ -377,7 +377,7 @@ export async function acceptMatchRequestRpc(requestId: string): Promise<string> 
         ? Number(catSnap.data().estimated_weight_kg ?? fallbackCatWeight)
         : fallbackCatWeight;
 
-      const qty = Number(reqData.requested_quantity ?? 1);
+      const qty = Math.max(1, Math.trunc(Number(reqData.requested_quantity ?? 1)));
       const available = Number(prod.available_quantity ?? 0);
       if (prod.status !== 'approved' || available < qty) {
         throw new Error('No queda suficiente cantidad disponible para completar este Match.');

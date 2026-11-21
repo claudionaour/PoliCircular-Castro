@@ -27,7 +27,7 @@ service cloud.firestore {
     }
 
     function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn();
     }
 
     function isOwner(uid) {
@@ -35,7 +35,7 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isVerifiedUser() && (
+      return isSignedIn() && request.auth.token.email_verified == true && (
         request.auth.token.email == 'claudionaourlopez@gmail.com' ||
         request.auth.token.email == 'naourclaudio@gmail.com' ||
         request.auth.token.email == 'businessnaourgroup@gmail.com'
@@ -66,6 +66,25 @@ service cloud.firestore {
 
     function optNumber(data, field) {
       return !(field in data) || data[field] == null || (data[field] is number);
+    }
+
+    function isMatchPairValid(matchData, pA, pB) {
+      return (matchData.owner_id == pA && matchData.requester_id == pB)
+        || (matchData.owner_id == pB && matchData.requester_id == pA);
+    }
+
+    function isValidExchangeForConfirmation(exData, data) {
+      return exData.owner_id == data.owner_id
+        && exData.requester_id == data.requester_id
+        && (
+          (data.user_id == request.auth.uid && (data.owner_id == request.auth.uid || data.requester_id == request.auth.uid))
+          || (data.owner_id == request.auth.uid && exData.status == 'completed')
+        );
+    }
+
+    function isValidExchangeForTree(exData, userId) {
+      return exData.status == 'completed'
+        && (exData.owner_id == userId || exData.requester_id == userId);
     }
 
     // =========================================================================
@@ -755,7 +774,6 @@ service cloud.firestore {
           incoming().status == 'active'
           || (
             incoming().status == 'completed'
-            && existsAfter(/databases/$(database)/documents/exchanges/$('ex_' + incoming().request_id))
             && getAfter(/databases/$(database)/documents/exchanges/$('ex_' + incoming().request_id)).data.status == 'completed'
           )
         );
@@ -786,15 +804,10 @@ service cloud.firestore {
         && (incoming().participant_a == request.auth.uid || incoming().participant_b == request.auth.uid)
         && incoming().is_blocked == false
         && incoming().created_at == request.time
-        && existsAfter(/databases/$(database)/documents/matches/$(incoming().match_id))
-        && (
-          (
-            getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.owner_id == incoming().participant_a
-            && getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.requester_id == incoming().participant_b
-          ) || (
-            getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.owner_id == incoming().participant_b
-            && getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data.requester_id == incoming().participant_a
-          )
+        && isMatchPairValid(
+          getAfter(/databases/$(database)/documents/matches/$(incoming().match_id)).data,
+          incoming().participant_a,
+          incoming().participant_b
         );
       allow update: if isVerifiedUser() && isValidId(conversationId)
         && isValidConversation(incoming(), conversationId)
@@ -908,17 +921,9 @@ service cloud.firestore {
         && incoming().user_id in [incoming().owner_id, incoming().requester_id]
         && confirmationId == (incoming().exchange_id + '_' + incoming().user_id)
         && incoming().confirmed_at == request.time
-        && existsAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id))
-        && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.owner_id == incoming().owner_id
-        && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.requester_id == incoming().requester_id
-        && (
-          (
-            incoming().user_id == request.auth.uid
-            && (incoming().owner_id == request.auth.uid || incoming().requester_id == request.auth.uid)
-          ) || (
-            incoming().owner_id == request.auth.uid
-            && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.status == 'completed'
-          )
+        && isValidExchangeForConfirmation(
+          getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data,
+          incoming()
         );
       allow update, delete: if false;
     }
@@ -999,10 +1004,9 @@ service cloud.firestore {
           ) || (
             incoming().completed_operations == 1
             && isValidId(incoming().last_exchange_id)
-            && getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.status == 'completed'
-            && (
-              getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.owner_id == userId
-              || getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.requester_id == userId
+            && isValidExchangeForTree(
+              getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data,
+              userId
             )
             && existsAfter(/databases/$(database)/documents/exchange_confirmations/$(incoming().last_exchange_id + '_' + userId))
           )
@@ -1011,18 +1015,17 @@ service cloud.firestore {
         && isValidTreeProgress(incoming(), userId)
         && incoming().updated_at == request.time
         && (
-          isAdmin()
-          || (
+          (
             incoming().completed_operations == existing().completed_operations + 1
             && isValidId(incoming().last_exchange_id)
             && (!('last_exchange_id' in existing()) || incoming().last_exchange_id != existing().last_exchange_id)
-            && getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.status == 'completed'
-            && (
-              getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.owner_id == userId
-              || getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data.requester_id == userId
+            && isValidExchangeForTree(
+              getAfter(/databases/$(database)/documents/exchanges/$(incoming().last_exchange_id)).data,
+              userId
             )
             && existsAfter(/databases/$(database)/documents/exchange_confirmations/$(incoming().last_exchange_id + '_' + userId))
           )
+          || isAdmin()
         );
       allow delete: if false;
     }

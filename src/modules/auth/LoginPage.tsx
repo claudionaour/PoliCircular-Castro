@@ -84,7 +84,7 @@ export const LoginPage: React.FC = () => {
           <h1 className="font-display text-2xl font-bold text-white">Iniciar sesión</h1>
         </div>
         <p className="text-sm text-slate-200 mb-6">
-          Ingresa con tu correo verificado{isNativeAndroid ? '' : ' o tu cuenta Google'} para publicar, proponer intercambios y revisar tu Árbol Circular.
+          Ingresa con tu correo{isNativeAndroid ? '' : ' o tu cuenta Google'} para publicar, proponer intercambios y revisar tu Árbol Circular.
         </p>
 
         {!isNativeAndroid && (
