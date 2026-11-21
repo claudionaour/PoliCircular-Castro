@@ -373,9 +373,11 @@ export async function acceptMatchRequestRpc(requestId: string): Promise<string> 
       const catSnap = await tx.get(doc(db, 'categories', String(prod.category_id)));
       const fallbackCatWeight =
         SEED_CATEGORIES.find((c) => c.id === String(prod.category_id))?.estimated_weight_kg ?? 1;
-      const catWeight = catSnap.exists()
+      const rawCatWeight = catSnap.exists()
         ? Number(catSnap.data().estimated_weight_kg ?? fallbackCatWeight)
         : fallbackCatWeight;
+      const catWeight =
+        Number.isFinite(rawCatWeight) && rawCatWeight >= 0 ? rawCatWeight : fallbackCatWeight;
 
       const qty = Math.max(1, Math.trunc(Number(reqData.requested_quantity ?? 1)));
       const available = Number(prod.available_quantity ?? 0);

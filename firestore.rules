@@ -567,7 +567,7 @@ service cloud.firestore {
     // USERS (PUBLIC PROFILE + ISOLATED PRIVATE PII + RBAC ROLES)
     // =========================================================================
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin() || resource.data.is_suspended == false);
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin() || resource == null || resource.data.is_suspended == false);
       allow list: if resource.data.is_suspended == false || (isSignedIn() && resource.data.id == request.auth.uid) || isAdmin();
       allow create: if isOwner(userId) && isValidId(userId)
         && isValidUserPublic(incoming(), userId)
@@ -638,7 +638,8 @@ service cloud.firestore {
     // =========================================================================
     match /products/{productId} {
       allow get: if isValidId(productId) && (
-        resource.data.status == 'approved'
+        resource == null
+        || resource.data.status == 'approved'
         || (isSignedIn() && resource.data.owner_id == request.auth.uid)
         || isModerator()
       );
@@ -664,20 +665,6 @@ service cloud.firestore {
         && incoming().created_at == existing().created_at
         && incoming().updated_at == request.time
         && (
-          // Action: Moderator decision
-          (
-            isModerator()
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'moderation_notes', 'moderated_by', 'moderated_at', 'updated_at'])
-            && incoming().status in ['approved', 'rejected', 'suspended']
-            && incoming().moderated_by == request.auth.uid
-          ) ||
-          // Action: Owner archiving own product
-          (
-            isOwner(existing().owner_id)
-            && existing().status in ['pending', 'approved', 'rejected']
-            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updated_at'])
-            && incoming().status == 'archived'
-          ) ||
           // Action: Owner updating stock when accepting match request (supports direct completion on Match)
           (
             isOwner(existing().owner_id)
@@ -685,6 +672,13 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly(['available_quantity', 'reserved_quantity', 'status', 'sync_exchange_id', 'updated_at'])
             && incoming().status in ['approved', 'reserved', 'completed']
             && incoming().available_quantity + incoming().reserved_quantity <= existing().total_quantity
+          ) ||
+          // Action: Owner archiving own product
+          (
+            isOwner(existing().owner_id)
+            && existing().status in ['pending', 'approved', 'rejected']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updated_at'])
+            && incoming().status == 'archived'
           ) ||
           // Action: Exchange participant completing or cancelling stock atomically (supports direct completion on Match)
           (
@@ -698,6 +692,13 @@ service cloud.firestore {
               || getAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.requester_id == request.auth.uid
             )
             && getAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.status in ['completed', 'cancelled']
+          ) ||
+          // Action: Moderator decision
+          (
+            isModerator()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'moderation_notes', 'moderated_by', 'moderated_at', 'updated_at'])
+            && incoming().status in ['approved', 'rejected', 'suspended']
+            && incoming().moderated_by == request.auth.uid
           )
         );
       allow delete: if false;
@@ -721,7 +722,7 @@ service cloud.firestore {
     // INTERESTS, MATCH REQUESTS & MATCHES
     // =========================================================================
     match /product_interests/{interestId} {
-      allow get: if isSignedIn() && isValidId(interestId) && resource.data.user_id == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(interestId) && (resource == null || resource.data.user_id == request.auth.uid);
       allow list: if isSignedIn() && resource.data.user_id == request.auth.uid;
       allow create, update: if isVerifiedUser() && isValidId(interestId)
         && isValidProductInterest(incoming(), interestId)
@@ -733,7 +734,7 @@ service cloud.firestore {
 
     match /match_requests/{requestId} {
       allow get: if isSignedIn() && isValidId(requestId)
-        && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
+        && (resource == null || resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(requestId)
@@ -762,7 +763,7 @@ service cloud.firestore {
 
     match /matches/{matchId} {
       allow get: if isSignedIn() && isValidId(matchId)
-        && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
+        && (resource == null || resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(matchId)
@@ -795,7 +796,7 @@ service cloud.firestore {
     // =========================================================================
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId)
-        && (resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid || isModerator());
+        && (resource == null || resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(conversationId)
@@ -823,7 +824,7 @@ service cloud.firestore {
 
     match /messages/{messageId} {
       allow get: if isSignedIn() && isValidId(messageId)
-        && (resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid || isModerator());
+        && (resource == null || resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.participant_a == request.auth.uid || resource.data.participant_b == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(messageId)
@@ -857,7 +858,7 @@ service cloud.firestore {
     // =========================================================================
     match /exchanges/{exchangeId} {
       allow get: if isSignedIn() && isValidId(exchangeId)
-        && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
+        && (resource == null || resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(exchangeId)
@@ -913,7 +914,7 @@ service cloud.firestore {
 
     match /exchange_confirmations/{confirmationId} {
       allow get: if isSignedIn() && isValidId(confirmationId)
-        && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
+        && (resource == null || resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && (resource.data.owner_id == request.auth.uid || resource.data.requester_id == request.auth.uid))
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(confirmationId)
@@ -959,7 +960,7 @@ service cloud.firestore {
 
     match /reports/{reportId} {
       allow get: if isSignedIn() && isValidId(reportId)
-        && (resource.data.reporter_id == request.auth.uid || isModerator());
+        && (resource == null || resource.data.reporter_id == request.auth.uid || isModerator());
       allow list: if (isSignedIn() && resource.data.reporter_id == request.auth.uid) || isModerator();
       allow create: if isVerifiedUser() && isValidId(reportId)
         && isValidReport(incoming(), reportId)
@@ -989,7 +990,7 @@ service cloud.firestore {
     // CIRCULAR TREE, ACHIEVEMENTS, IMPACT, NOTIFICATIONS & EDUCATION
     // =========================================================================
     match /user_tree_progress/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow get: if isSignedIn() && isValidId(userId);
       allow list: if (isSignedIn() && resource.data.user_id == request.auth.uid) || isAdmin();
       allow create: if isVerifiedUser() && isValidId(userId)
         && isValidTreeProgress(incoming(), userId)
@@ -1031,7 +1032,7 @@ service cloud.firestore {
     }
 
     match /user_achievements/{recId} {
-      allow get: if isSignedIn() && isValidId(recId) && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow get: if isSignedIn() && isValidId(recId) && (resource == null || resource.data.user_id == request.auth.uid || isAdmin());
       allow list: if (isSignedIn() && resource.data.user_id == request.auth.uid) || isAdmin();
       allow create: if isVerifiedUser() && isValidId(recId)
         && isValidUserAchievement(incoming(), recId)
@@ -1058,7 +1059,7 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow get: if isSignedIn() && isValidId(notificationId) && resource.data.user_id == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(notificationId) && (resource == null || resource.data.user_id == request.auth.uid);
       allow list: if isSignedIn() && resource.data.user_id == request.auth.uid;
       allow create: if isVerifiedUser() && isValidId(notificationId)
         && isValidNotification(incoming(), notificationId)
@@ -1078,7 +1079,7 @@ service cloud.firestore {
     }
 
     match /education_progress/{progressId} {
-      allow get: if isSignedIn() && isValidId(progressId) && resource.data.user_id == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(progressId) && (resource == null || resource.data.user_id == request.auth.uid);
       allow list: if isSignedIn() && resource.data.user_id == request.auth.uid;
       allow create, update: if isVerifiedUser() && isValidId(progressId)
         && isValidEducationProgress(incoming(), progressId)
