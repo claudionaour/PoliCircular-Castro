@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { ArrowRight, BookOpen, Compass, Gift, RefreshCw, ShieldCheck, Trees } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
@@ -9,7 +9,11 @@ import heroCastroImg from '../../assets/images/hero_castro_circular_179485157950
 import showcaseObjectsImg from '../../assets/images/circular_objects_showcase_1794851579551.jpg';
 
 export const WelcomePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (!loading && user) {
+    return <Navigate to="/inicio" replace />;
+  }
 
   return (
     <div className="bg-[#0B1E33]">

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { LogIn, MailCheck } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import {
   resendVerificationEmail,
   signInUser,
@@ -20,6 +21,7 @@ const loginSchema = z.object({
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 export const LoginPage: React.FC = () => {
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const isNativeAndroid = Capacitor.isNativePlatform();
@@ -36,7 +38,13 @@ export const LoginPage: React.FC = () => {
     resolver: zodResolver(loginSchema),
   });
 
-  const fromPath = (location.state as { from?: string } | null)?.from || '/inicio';
+  const rawFrom = (location.state as { from?: string } | null)?.from;
+  const fromPath =
+    rawFrom && !['/', '/iniciar-sesion', '/registro'].includes(rawFrom) ? rawFrom : '/inicio';
+
+  if (!loading && user) {
+    return <Navigate to={fromPath} replace />;
+  }
 
   const onSubmit = async (values: LoginFormValues) => {
     setServerError(null);

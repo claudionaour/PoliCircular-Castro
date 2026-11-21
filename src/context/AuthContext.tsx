@@ -39,10 +39,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadUserData = useCallback(async (firebaseUser: User) => {
     try {
-      await ensureBootstrapProfile(firebaseUser).catch(() => {});
+      await ensureBootstrapProfile(firebaseUser).catch((err) => {
+        console.warn('Bootstrap de perfil pendiente:', err);
+      });
       const [prof, userRoles] = await Promise.all([
-        fetchUserProfile(firebaseUser.uid),
-        fetchUserRoles(firebaseUser.uid, firebaseUser.email),
+        fetchUserProfile(firebaseUser.uid).catch(() => null),
+        fetchUserRoles(firebaseUser.uid, firebaseUser.email).catch(() => ['user'] as UserRole[]),
       ]);
       setProfile(prof);
       setRoles(userRoles);
@@ -69,17 +71,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     testFirestoreConnection();
     let active = true;
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (!active) return;
       setUser(firebaseUser);
       setVerifiedState(Boolean(firebaseUser));
+      setLoading(false);
       if (firebaseUser) {
-        await loadUserData(firebaseUser);
+        void loadUserData(firebaseUser);
       } else {
         setProfile(null);
         setRoles(['user']);
       }
-      if (active) setLoading(false);
     });
 
     return () => {

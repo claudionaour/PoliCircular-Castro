@@ -123,12 +123,16 @@ export async function initializeUserDocuments(
       ? normalizedUsername
       : `vecino_${uid.slice(0, 6)}`;
 
+  const cleanFullName = details.fullName.trim();
+  const safeFullName =
+    cleanFullName.length >= 2 ? cleanFullName.slice(0, 120) : 'Participante PoliCircular';
+
   const batch = writeBatch(db);
   batch.set(userRef, {
     id: uid,
-    full_name: details.fullName.trim() || 'Participante PoliCircular',
+    full_name: safeFullName,
     username: safeUsername,
-    avatar_url: firebaseUser.photoURL || null,
+    avatar_url: firebaseUser.photoURL ? firebaseUser.photoURL.slice(0, 2000) : null,
     bio: null,
     commune_id: details.communeId || 'castro',
     commune_name: communeName || 'Castro',
@@ -212,7 +216,9 @@ export async function registerUser(payload: RegisterPayload) {
 
 export async function signInUser(email: string, password: string) {
   const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
-  await ensureBootstrapProfile(credential.user);
+  void ensureBootstrapProfile(credential.user).catch((err) => {
+    console.warn('No se pudo inicializar perfil tras login:', err);
+  });
   return { user: credential.user };
 }
 
@@ -220,7 +226,9 @@ export async function signInWithGoogle(): Promise<User> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(auth, provider);
-  await ensureBootstrapProfile(result.user);
+  void ensureBootstrapProfile(result.user).catch((err) => {
+    console.warn('No se pudo inicializar perfil tras Google login:', err);
+  });
   return result.user;
 }
 

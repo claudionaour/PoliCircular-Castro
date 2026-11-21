@@ -55,7 +55,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setLoadingSubscription(true);
     try {
       const [items, sub] = await Promise.all([
-        listNotifications(user.uid),
+        listNotifications(user.uid).catch(() => []),
         getProductAlertSubscription(user.uid).catch(() => null),
       ]);
       setNotifications(items);
