@@ -80,6 +80,14 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Superadministrador',
 };
 
+export function computeTreeStage(operations: number): TreeStage {
+  if (operations >= 15) return 'arbol_frutal';
+  if (operations >= 9) return 'arbol_desarrollado';
+  if (operations >= 3) return 'arbol_joven';
+  if (operations >= 1) return 'brote';
+  return 'semilla';
+}
+
 export const TREE_STAGE_INFO: Record<
   TreeStage,
   { label: string; minOps: number; nextOps: number | null; description: string }
@@ -94,25 +102,25 @@ export const TREE_STAGE_INFO: Record<
     label: 'Brote',
     minOps: 1,
     nextOps: 3,
-    description: 'Completaste tu primera operación circular verificada por ambas partes.',
+    description: 'Completaste tu primera operación circular confirmada al hacer Match.',
   },
   arbol_joven: {
     label: 'Árbol joven',
     minOps: 3,
-    nextOps: 10,
-    description: 'Tres objetos ya recibieron una segunda oportunidad gracias a ti.',
+    nextOps: 9,
+    description: 'Tres operaciones ya dieron una segunda oportunidad a objetos útiles.',
   },
   arbol_desarrollado: {
     label: 'Árbol desarrollado',
-    minOps: 10,
-    nextOps: 25,
-    description: 'Diez operaciones exitosas fortaleciendo la reutilización en tu comuna.',
+    minOps: 9,
+    nextOps: 15,
+    description: 'Nueve operaciones exitosas fortaleciendo la reutilización en tu comuna.',
   },
   arbol_frutal: {
     label: 'Árbol frutal',
-    minOps: 25,
+    minOps: 15,
     nextOps: null,
-    description: 'Referente circular comunitario con 25 o más operaciones verificadas.',
+    description: 'Referente circular comunitario con 15 o más operaciones completadas.',
   },
 };
 

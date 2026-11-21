@@ -169,8 +169,8 @@ export async function fetchImagesByProductIds(
   const idSet = new Set(uniqueIds);
   const snap = await getDocs(
     query(collection(db, 'product_images'), where('sort_order', '>=', 0))
-  );
-  snap.forEach((docSnap) => {
+  ).catch(() => null);
+  snap?.forEach((docSnap) => {
     const img = mapProductImageDoc(docSnap.id, docSnap.data());
     if (!idSet.has(img.product_id)) return;
     const existing = map.get(img.product_id) ?? [];

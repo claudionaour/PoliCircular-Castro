@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Archive, PlusCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { archiveOwnProduct, listMyProducts } from '../../services/productService';
+import { translateFirebaseError } from '../../services/firebase';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import {
   CONDITION_LABELS,
@@ -26,7 +27,7 @@ export const MyProductsPage: React.FC = () => {
       const data = await listMyProducts(user.uid);
       setProducts(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error cargando publicaciones.');
+      setError(translateFirebaseError(err));
     } finally {
       setLoading(false);
     }
@@ -41,7 +42,7 @@ export const MyProductsPage: React.FC = () => {
       await archiveOwnProduct(id);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo archivar.');
+      setError(translateFirebaseError(err));
     }
   };
 

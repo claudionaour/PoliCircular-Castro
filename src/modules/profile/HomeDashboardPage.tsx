@@ -8,80 +8,62 @@ import {
   Package,
   PlusCircle,
   Trees,
-  Truck,
-  User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getTreeProgress } from '../../services/treeImpactService';
+import { listMatchRequests, listUserMatches } from '../../services/matchingService';
+import { subscribeTreeProgress } from '../../services/treeImpactService';
 import { TREE_STAGE_INFO } from '../../utils/formatters';
 import type { UserTreeProgress } from '../../types/domain';
 
-const QUICK_ACCESS = [
-  {
-    to: '/explorar',
-    title: 'Explorar',
-    desc: 'Descubre productos publicados al instante en tu comuna',
-    icon: Compass,
-  },
-  {
-    to: '/publicar',
-    title: 'Publicar',
-    desc: 'Publica un regalo o intercambio al catálogo al instante',
-    icon: PlusCircle,
-  },
-  {
-    to: '/mis-publicaciones',
-    title: 'Mis publicaciones',
-    desc: 'Estado y unidades disponibles de tus artículos',
-    icon: Package,
-  },
+const PRIMARY_SECTIONS = [
   {
     to: '/matches',
-    title: 'Mis Match',
-    desc: 'Solicitudes, propuestas y chat privado',
+    title: 'Mis Match y Chat',
+    desc: 'Responde solicitudes y coordina tus retiros por chat.',
     icon: ArrowLeftRight,
   },
   {
-    to: '/intercambios',
-    title: 'Mis intercambios',
-    desc: 'Coordinación y confirmación bilateral',
-    icon: Truck,
+    to: '/mis-publicaciones',
+    title: 'Mis productos',
+    desc: 'Gestiona tus artículos publicados y stock disponible.',
+    icon: Package,
   },
   {
     to: '/mi-arbol',
-    title: 'Mi Árbol',
-    desc: 'Etapa actual e insignias verificadas',
+    title: 'Mi Árbol Circular',
+    desc: 'Sigue tu crecimiento automático e insignias obtenidas.',
     icon: Trees,
   },
   {
     to: '/impacto',
-    title: 'Impacto Circular',
-    desc: 'Estadísticas de reutilización y peso',
+    title: 'Impacto Ambiental',
+    desc: 'Revisa los kilos recuperados y cifras de la comunidad.',
     icon: BarChart3,
   },
   {
     to: '/educacion',
-    title: 'Centro Educativo',
-    desc: 'Aprendamos a Circular y desafíos',
+    title: 'Aprende a Circular',
+    desc: 'Guías prácticas y desafíos de economía circular.',
     icon: BookOpen,
-  },
-  {
-    to: '/perfil',
-    title: 'Mi perfil',
-    desc: 'Datos públicos, reputación y territorio',
-    icon: User,
   },
 ];
 
 export const HomeDashboardPage: React.FC = () => {
   const { user, profile } = useAuth();
   const [tree, setTree] = useState<UserTreeProgress | null>(null);
+  const [pendingReceived, setPendingReceived] = useState(0);
+  const [matchesCount, setMatchesCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
-    getTreeProgress(user.uid)
-      .then(setTree)
-      .catch(() => setTree(null));
+    const unsubTree = subscribeTreeProgress(user.uid, setTree);
+    Promise.all([listMatchRequests(user.uid), listUserMatches(user.uid)])
+      .then(([reqs, matches]) => {
+        setPendingReceived(reqs.filter((r) => r.owner_id === user.uid && r.status === 'pending').length);
+        setMatchesCount(matches.length);
+      })
+      .catch(() => {});
+    return () => unsubTree();
   }, [user]);
 
   const stageInfo = TREE_STAGE_INFO[tree?.current_stage ?? 'semilla'];
@@ -97,8 +79,8 @@ export const HomeDashboardPage: React.FC = () => {
             Hola, {profile?.full_name || 'Participante'}
           </h1>
           <p className="text-sm text-slate-200 max-w-xl">
-            Lo que ya no necesitas puede ser lo que alguien está buscando. Etapa actual de tu Árbol Circular:{' '}
-            <strong className="text-white">{stageInfo.label}</strong> ({tree?.completed_operations ?? 0} operaciones verificadas).
+            Cada Match confirma la operación al instante y hace crecer tu Árbol Circular. Etapa actual:{' '}
+            <strong className="text-[#6EE7B7]">{stageInfo.label}</strong> ({tree?.completed_operations ?? 0} operaciones).
           </p>
         </div>
 
@@ -120,10 +102,50 @@ export const HomeDashboardPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Resumen en vivo de actividad */}
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Link
+          to="/matches"
+          className="rounded-2xl bg-[#102C49] border border-[#244B73] hover:border-[#FFA94D]/60 p-4 transition-colors"
+        >
+          <span className="text-xs text-slate-300 block">Solicitudes por responder</span>
+          <span className="font-mono text-2xl font-bold text-[#FFA94D] tabular-nums mt-1 block">
+            {pendingReceived}
+          </span>
+        </Link>
+        <Link
+          to="/matches"
+          className="rounded-2xl bg-[#102C49] border border-[#244B73] hover:border-[#FFA94D]/60 p-4 transition-colors"
+        >
+          <span className="text-xs text-slate-300 block">Match confirmados</span>
+          <span className="font-mono text-2xl font-bold text-white tabular-nums mt-1 block">
+            {matchesCount}
+          </span>
+        </Link>
+        <Link
+          to="/mi-arbol"
+          className="rounded-2xl bg-[#102C49] border border-[#244B73] hover:border-[#34D399]/60 p-4 transition-colors"
+        >
+          <span className="text-xs text-slate-300 block">Regalos completados</span>
+          <span className="font-mono text-2xl font-bold text-[#6EE7B7] tabular-nums mt-1 block">
+            {tree?.completed_gifts ?? 0}
+          </span>
+        </Link>
+        <Link
+          to="/mi-arbol"
+          className="rounded-2xl bg-[#102C49] border border-[#244B73] hover:border-[#FFA94D]/60 p-4 transition-colors"
+        >
+          <span className="text-xs text-slate-300 block">Intercambios realizados</span>
+          <span className="font-mono text-2xl font-bold text-white tabular-nums mt-1 block">
+            {tree?.completed_exchanges ?? 0}
+          </span>
+        </Link>
+      </section>
+
       <section>
-        <h2 className="font-display text-lg font-bold text-white mb-4">Accesos rápidos</h2>
+        <h2 className="font-display text-lg font-bold text-white mb-4">¿Qué quieres hacer hoy?</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {QUICK_ACCESS.map((item) => {
+          {PRIMARY_SECTIONS.map((item) => {
             const Icon = item.icon;
             return (
               <Link

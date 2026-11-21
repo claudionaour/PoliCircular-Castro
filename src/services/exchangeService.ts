@@ -26,6 +26,7 @@ import {
   fetchProfilesMap,
   hydrateProductDoc,
 } from './firestoreHelpers';
+import { computeTreeStage } from '../utils/formatters';
 import type {
   ExchangeConfirmation,
   ExchangeRecord,
@@ -33,16 +34,7 @@ import type {
   Product,
   ProductModality,
   Review,
-  TreeStage,
 } from '../types/domain';
-
-function computeTreeStage(operations: number): TreeStage {
-  if (operations >= 15) return 'arbol_frutal';
-  if (operations >= 9) return 'arbol_desarrollado';
-  if (operations >= 5) return 'arbol_joven';
-  if (operations >= 2) return 'brote';
-  return 'semilla';
-}
 
 export async function listUserExchanges(userId: string): Promise<ExchangeRecord[]> {
   try {

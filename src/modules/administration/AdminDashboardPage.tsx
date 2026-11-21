@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getAdminDashboardStats, type AdminDashboardStats } from '../../services/adminService';
 import { listImpactRecords } from '../../services/treeImpactService';
+import { translateFirebaseError } from '../../services/firebase';
 
 export const AdminDashboardPage: React.FC = () => {
   const [stats, setStats] = useState<AdminDashboardStats | null>(null);
   const [impactWeight, setImpactWeight] = useState({ measured: 0, estimated: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([getAdminDashboardStats(), listImpactRecords()])
@@ -20,11 +22,20 @@ export const AdminDashboardPage: React.FC = () => {
         }
         setImpactWeight({ measured, estimated });
       })
+      .catch((err) => setError(translateFirebaseError(err)))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading || !stats) {
+  if (loading) {
     return <div className="p-6 text-sm text-slate-300">Cargando métricas administrativas...</div>;
+  }
+
+  if (error || !stats) {
+    return (
+      <div className="rounded-xl bg-red-950/70 border border-red-400/40 p-4 text-xs text-red-200">
+        {error || 'No fue posible cargar las métricas administrativas.'}
+      </div>
+    );
   }
 
   const cards = [

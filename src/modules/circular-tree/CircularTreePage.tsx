@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { Award, CheckCircle2, Lock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  getTreeProgress,
   listAllAchievements,
-  listUserAchievements,
+  subscribeTreeProgress,
+  subscribeUserAchievements,
 } from '../../services/treeImpactService';
+import { SEED_ACHIEVEMENTS } from '../../services/seedService';
 import { formatChileDate, TREE_STAGE_INFO } from '../../utils/formatters';
 import type { Achievement, TreeStage, UserAchievement, UserTreeProgress } from '../../types/domain';
 
@@ -91,29 +92,34 @@ export const CircularTreePage: React.FC = () => {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([
-      getTreeProgress(user.uid),
-      listAllAchievements(),
-      listUserAchievements(user.uid),
-    ])
-      .then(([prog, allAch, userAch]) => {
-        setProgress(prog);
-        setAllAchievements(allAch);
-        setUserAchievements(userAch);
-      })
-      .catch(() => {});
+    listAllAchievements()
+      .then(setAllAchievements)
+      .catch(() => setAllAchievements([]));
+    const unsubProgress = subscribeTreeProgress(user.uid, setProgress);
+    const unsubAchievements = subscribeUserAchievements(user.uid, setUserAchievements);
+    return () => {
+      unsubProgress();
+      unsubAchievements();
+    };
   }, [user]);
 
   const stage: TreeStage = progress?.current_stage ?? 'semilla';
   const stageInfo = TREE_STAGE_INFO[stage];
   const ops = progress?.completed_operations ?? 0;
+  const displayedAchievements: Achievement[] =
+    allAchievements.length > 0
+      ? allAchievements
+      : SEED_ACHIEVEMENTS.map((a) => ({
+          ...a,
+          category: a.category as Achievement['category'],
+        }));
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl font-bold text-white">Mi Árbol Circular</h1>
         <p className="text-sm text-slate-300">
-          Tu árbol crece únicamente con operaciones reales confirmadas por ambas partes. Las publicaciones pendientes o activas no suman operaciones.
+          Tu árbol crece automáticamente cada vez que concretas un Match por regalo o intercambio.
         </p>
       </div>
 
@@ -192,45 +198,39 @@ export const CircularTreePage: React.FC = () => {
       {/* Insignias */}
       <section className="rounded-2xl bg-[#102C49] border border-[#244B73] p-6 space-y-4">
         <h2 className="font-display text-lg font-bold text-white">Insignias circulares</h2>
-        {allAchievements.length === 0 ? (
-          <p className="text-xs text-slate-300">
-            El catálogo oficial de insignias se sincronizará al inicializar la semilla territorial en Firestore.
-          </p>
-        ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {allAchievements.map((ach) => {
-              const unlocked = userAchievements.find((ua) => ua.achievement_id === ach.id);
-              return (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {displayedAchievements.map((ach) => {
+            const unlocked = userAchievements.find((ua) => ua.achievement_id === ach.id);
+            return (
+              <div
+                key={ach.id}
+                className={`rounded-xl border p-4 flex items-start gap-3 ${
+                  unlocked ? 'border-[#34D399]/40 bg-[#143D29]' : 'border-[#244B73] bg-[#0B1E33] opacity-80'
+                }`}
+              >
                 <div
-                  key={ach.id}
-                  className={`rounded-xl border p-4 flex items-start gap-3 ${
-                    unlocked ? 'border-[#34D399]/40 bg-[#143D29]' : 'border-[#244B73] bg-[#0B1E33] opacity-80'
+                  className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
+                    unlocked ? 'bg-[#34D399] text-[#0B1E33]' : 'bg-[#1A3B5C] text-slate-300'
                   }`}
                 >
-                  <div
-                    className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
-                      unlocked ? 'bg-[#34D399] text-[#0B1E33]' : 'bg-[#1A3B5C] text-slate-300'
-                    }`}
-                  >
-                    {unlocked ? <Award className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="font-display font-bold text-sm text-white">{ach.name}</h3>
-                      {unlocked && <CheckCircle2 className="h-3.5 w-3.5 text-[#6EE7B7]" />}
-                    </div>
-                    <p className="text-xs text-slate-200">{ach.description}</p>
-                    {unlocked && (
-                      <p className="text-[11px] text-[#6EE7B7] font-medium">
-                        Desbloqueada el {formatChileDate(unlocked.unlocked_at)}
-                      </p>
-                    )}
-                  </div>
+                  {unlocked ? <Award className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
                 </div>
-              );
-            })}
-          </div>
-        )}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="font-display font-bold text-sm text-white">{ach.name}</h3>
+                    {unlocked && <CheckCircle2 className="h-3.5 w-3.5 text-[#6EE7B7]" />}
+                  </div>
+                  <p className="text-xs text-slate-200">{ach.description}</p>
+                  {unlocked && (
+                    <p className="text-[11px] text-[#6EE7B7] font-medium">
+                      Desbloqueada el {formatChileDate(unlocked.unlocked_at)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </section>
     </div>
   );

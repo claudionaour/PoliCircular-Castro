@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, Info, Printer, Scale } from 'lucide-react';
 import {
   getCommunityParticipationCounts,
-  listImpactRecords,
+  subscribeImpactRecords,
 } from '../../services/treeImpactService';
 import { listActiveCommunes } from '../../services/territorialService';
 import { exportImpactCsv } from '../../utils/csvExport';
@@ -22,10 +22,11 @@ export const ImpactPage: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    listImpactRecords(selectedCommuneId || undefined)
-      .then(setRecords)
-      .catch(() => setRecords([]))
-      .finally(() => setLoading(false));
+    const unsub = subscribeImpactRecords(selectedCommuneId || undefined, (items) => {
+      setRecords(items);
+      setLoading(false);
+    });
+    return () => unsub();
   }, [selectedCommuneId]);
 
   const stats = useMemo(() => {
@@ -180,7 +181,7 @@ export const ImpactPage: React.FC = () => {
             {stats.estimatedKg.toFixed(2)} kg
           </p>
           <p className="text-xs text-slate-200">
-            Calculado mediante pesos de referencia por categoría cuando no existió pesaje real. No representa medición directa.
+            Calculado automáticamente según los pesos de referencia por categoría en cada Match completado. No representa medición directa.
           </p>
         </section>
       </div>

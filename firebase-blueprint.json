@@ -207,7 +207,7 @@
     },
     "MatchRecord": {
       "title": "MatchRecord",
-      "description": "Match aceptado con reserva de unidades.",
+      "description": "Match aceptado con confirmación y contabilización automática.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -257,7 +257,7 @@
     },
     "Exchange": {
       "title": "Exchange",
-      "description": "Coordinación y seguimiento de entrega bilateral.",
+      "description": "Registro de entrega confirmada automáticamente al producirse el Match y coordinación logística.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -280,7 +280,7 @@
     },
     "ExchangeConfirmation": {
       "title": "ExchangeConfirmation",
-      "description": "Confirmación individual de entrega realizada por una de las partes.",
+      "description": "Registro automático de confirmación de entrega/recibo para cada participante al generarse el Match.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 260, "pattern": "^[a-zA-Z0-9_\\-]+$" },

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BellRing, Bookmark, Flag, Gift, RefreshCw, Star } from 'lucide-react';
+import { ArrowLeft, BellRing, Bookmark, Flag, Gift, LogIn, RefreshCw, Star } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { getProductById, listMyProducts } from '../../services/productService';
 import { createMatchRequest, upsertProductInterest } from '../../services/matchingService';
+import { translateFirebaseError } from '../../services/firebase';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { OsmSectorMap } from '../../components/OsmSectorMap';
 import { ReportModal } from '../../components/ReportModal';
@@ -32,6 +33,7 @@ export const ProductDetailPage: React.FC = () => {
   const [requestedQuantityInput, setRequestedQuantityInput] = useState('1');
   const [requestMessage, setRequestMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [alertStatus, setAlertStatus] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
@@ -61,7 +63,7 @@ export const ProductDetailPage: React.FC = () => {
       navigate('/iniciar-sesion');
       return;
     }
-    const parsedQty = parseInt(requestedQuantityInput, 10);
+    const parsedQty = product.available_quantity === 1 ? 1 : parseInt(requestedQuantityInput, 10);
     if (!Number.isInteger(parsedQty) || parsedQty < 1 || parsedQty > product.available_quantity) {
       setStatusMsg({
         type: 'err',
@@ -84,13 +86,13 @@ export const ProductDetailPage: React.FC = () => {
       });
       setStatusMsg({
         type: 'ok',
-        text: 'Solicitud enviada. Cuando el propietario acepte, se creará el Match y el chat privado.',
+        text: 'Solicitud enviada. Cuando el propietario acepte, se confirmará el Match automáticamente y se abrirá el chat privado.',
       });
       setRequestMessage('');
     } catch (err) {
       setStatusMsg({
         type: 'err',
-        text: err instanceof Error ? err.message : 'No fue posible enviar la solicitud.',
+        text: translateFirebaseError(err),
       });
     } finally {
       setSubmitting(false);
@@ -246,37 +248,56 @@ export const ProductDetailPage: React.FC = () => {
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
+                    disabled={actionBusy}
                     onClick={async () => {
                       if (!isEmailVerified) {
                         setAlertStatus('Verifica tu correo para activar alertas.');
                         return;
                       }
-                      const existingCats = alertSubscription?.category_ids ?? [];
-                      const nextCats = existingCats.includes(product.category_id)
-                        ? existingCats
-                        : [...existingCats, product.category_id];
-                      await saveAlertPreferences({
-                        enabled: true,
-                        categoryIds: nextCats,
-                        communeId: alertSubscription?.commune_id ?? null,
-                        modality: alertSubscription?.modality ?? 'all',
-                        keywords: alertSubscription?.keywords ?? [],
-                        browserNotifications: alertSubscription?.browser_notifications ?? false,
-                      });
-                      setAlertStatus(
-                        `Alertas activadas para nuevos productos en ${product.categories?.name || 'esta categoría'}.`
-                      );
+                      setActionBusy(true);
+                      try {
+                        const existingCats = alertSubscription?.category_ids ?? [];
+                        const nextCats = existingCats.includes(product.category_id)
+                          ? existingCats
+                          : [...existingCats, product.category_id];
+                        await saveAlertPreferences({
+                          enabled: true,
+                          categoryIds: nextCats,
+                          communeId: alertSubscription?.commune_id ?? null,
+                          modality: alertSubscription?.modality ?? 'all',
+                          keywords: alertSubscription?.keywords ?? [],
+                          browserNotifications: alertSubscription?.browser_notifications ?? false,
+                        });
+                        setAlertStatus(
+                          `Alertas activadas para nuevos productos en ${product.categories?.name || 'esta categoría'}.`
+                        );
+                      } catch (err) {
+                        setAlertStatus(translateFirebaseError(err));
+                      } finally {
+                        setActionBusy(false);
+                      }
                     }}
                     title="Avisarme cuando se publiquen productos similares"
-                    className="p-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-slate-200 hover:text-[#6EE7B7]"
+                    className="p-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-slate-200 hover:text-[#6EE7B7] disabled:opacity-50"
                     aria-label="Activar alerta de nuevos productos de esta categoría"
                   >
                     <BellRing className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => upsertProductInterest(product.id, user.uid, 'favorite')}
-                    className="p-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-slate-200 hover:text-[#FFA94D]"
+                    disabled={actionBusy}
+                    onClick={async () => {
+                      setActionBusy(true);
+                      try {
+                        await upsertProductInterest(product.id, user.uid, 'favorite');
+                        setAlertStatus('Guardado en tus favoritos.');
+                      } catch (err) {
+                        setAlertStatus(translateFirebaseError(err));
+                      } finally {
+                        setActionBusy(false);
+                      }
+                    }}
+                    className="p-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-slate-200 hover:text-[#FFA94D] disabled:opacity-50"
                     aria-label="Guardar favorito"
                   >
                     <Bookmark className="h-4 w-4" />
@@ -299,102 +320,150 @@ export const ProductDetailPage: React.FC = () => {
             )}
           </div>
 
-          {/* Formulario de solicitud / intercambio */}
-          {!isOwner && product.status === 'approved' && product.available_quantity > 0 && (
-            <form
-              onSubmit={handleRequestSubmit}
-              className="rounded-2xl bg-[#102C49] border border-[#244B73] p-6 space-y-4"
-            >
-              <div className="flex items-center gap-2 font-display font-bold text-base text-white">
-                {product.modality === 'gift' ? (
-                  <>
-                    <Gift className="h-5 w-5 text-[#6EE7B7]" />
-                    <span>Me interesa este regalo</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="h-5 w-5 text-[#FFA94D]" />
-                    <span>Proponer intercambio</span>
-                  </>
-                )}
+          {/* Estado para dueño, invitado o formulario de solicitud */}
+          {isOwner ? (
+            <div className="rounded-2xl bg-[#102C49] border border-[#244B73] p-6 space-y-3">
+              <h2 className="font-display font-bold text-base text-white">Esta es tu publicación</h2>
+              <p className="text-xs text-slate-300">
+                Administra tus artículos o revisa si alguien te envió una solicitud para generar Match.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  to="/matches"
+                  className="px-4 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242]"
+                >
+                  Ver solicitudes y Match
+                </Link>
+                <Link
+                  to="/mis-publicaciones"
+                  className="px-4 py-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-xs font-semibold text-white hover:bg-[#163B61]"
+                >
+                  Mis productos
+                </Link>
               </div>
+            </div>
+          ) : product.status === 'approved' && product.available_quantity > 0 && !user ? (
+            <div className="rounded-2xl bg-[#102C49] border border-[#244B73] p-6 space-y-3">
+              <h2 className="font-display font-bold text-base text-white">
+                Inicia sesión para solicitar este producto
+              </h2>
+              <p className="text-xs text-slate-300">
+                Con tu cuenta podrás enviar una solicitud, hacer Match y coordinar la entrega por chat.
+              </p>
+              <Link
+                to="/iniciar-sesion"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#F28C28] text-[#0B1E33] text-sm font-bold hover:bg-[#FFA242]"
+              >
+                <LogIn className="h-4 w-4" />
+                <span>Iniciar sesión</span>
+              </Link>
+            </div>
+          ) : (
+            product.status === 'approved' &&
+            product.available_quantity > 0 && (
+              <form
+                onSubmit={handleRequestSubmit}
+                className="rounded-2xl bg-[#102C49] border border-[#244B73] p-6 space-y-4"
+              >
+                <div className="flex items-center gap-2 font-display font-bold text-base text-white">
+                  {product.modality === 'gift' ? (
+                    <>
+                      <Gift className="h-5 w-5 text-[#6EE7B7]" />
+                      <span>Solicitar este regalo</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-5 w-5 text-[#FFA94D]" />
+                      <span>Proponer intercambio</span>
+                    </>
+                  )}
+                </div>
 
-              {product.available_quantity > 1 && (
+                {product.available_quantity > 1 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                      Cantidad solicitada ({getUnitDisplayLabel(product.quantity_unit)})
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={requestedQuantityInput}
+                      onChange={(e) => {
+                        const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 3);
+                        setRequestedQuantityInput(digitsOnly);
+                      }}
+                      placeholder={`1 a ${product.available_quantity}`}
+                      className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3 py-2 text-sm font-mono tabular-nums"
+                    />
+                  </div>
+                )}
+
+                {product.modality === 'exchange' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-200 mb-1">
+                      Asociar uno de tus productos publicados (opcional)
+                    </label>
+                    <select
+                      value={offeredProductId}
+                      onChange={(e) => setOfferedProductId(e.target.value)}
+                      className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white px-3 py-2.5 text-sm"
+                    >
+                      <option value="">Acordar producto directamente por chat</option>
+                      {myApprovedProducts.map((mp) => (
+                        <option key={mp.id} value={mp.id}>
+                          {mp.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-200 mb-1">
-                    Cantidad solicitada ({getUnitDisplayLabel(product.quantity_unit)})
+                    Mensaje para {product.profiles?.full_name}
                   </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={requestedQuantityInput}
-                    onChange={(e) => {
-                      const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 3);
-                      setRequestedQuantityInput(digitsOnly);
-                    }}
-                    placeholder={`1 a ${product.available_quantity}`}
-                    className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3 py-2 text-sm font-mono tabular-nums"
+                  <textarea
+                    rows={3}
+                    value={requestMessage}
+                    onChange={(e) => setRequestMessage(e.target.value)}
+                    placeholder="Cuéntale por qué te sirve este objeto o qué propones para coordinar."
+                    className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3 py-2 text-sm"
                   />
                 </div>
-              )}
 
-              {product.modality === 'exchange' && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-200 mb-1">
-                    Asociar uno de tus productos publicados (opcional)
-                  </label>
-                  <select
-                    value={offeredProductId}
-                    onChange={(e) => setOfferedProductId(e.target.value)}
-                    className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white px-3 py-2.5 text-sm"
+                {statusMsg && (
+                  <div
+                    className={`rounded-xl p-3 text-xs space-y-2 ${
+                      statusMsg.type === 'ok'
+                        ? 'bg-[#143D29] border border-[#34D399]/35 text-[#6EE7B7]'
+                        : 'bg-red-950/70 text-red-200 border border-red-400/40'
+                    }`}
                   >
-                    <option value="">Acordar producto directamente por chat</option>
-                    {myApprovedProducts.map((mp) => (
-                      <option key={mp.id} value={mp.id}>
-                        {mp.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                    <p>{statusMsg.text}</p>
+                    {statusMsg.type === 'ok' && (
+                      <Link
+                        to="/matches"
+                        className="inline-block font-bold text-white underline hover:text-[#FFA94D]"
+                      >
+                        Ver estado en Mis Match
+                      </Link>
+                    )}
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-200 mb-1">
-                  Mensaje para {product.profiles?.full_name}
-                </label>
-                <textarea
-                  rows={3}
-                  value={requestMessage}
-                  onChange={(e) => setRequestMessage(e.target.value)}
-                  placeholder="Cuéntale por qué te sirve este objeto o qué propones para coordinar."
-                  className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3 py-2 text-sm"
-                />
-              </div>
-
-              {statusMsg && (
-                <div
-                  className={`rounded-xl p-3 text-xs ${
-                    statusMsg.type === 'ok'
-                      ? 'bg-[#143D29] border border-[#34D399]/35 text-[#6EE7B7]'
-                      : 'bg-red-950/70 text-red-200 border border-red-400/40'
-                  }`}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-xl bg-[#F28C28] py-3 text-sm font-bold text-[#0B1E33] hover:bg-[#FFA242] transition-colors disabled:opacity-50 min-h-[44px]"
                 >
-                  {statusMsg.text}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-xl bg-[#F28C28] py-3 text-sm font-bold text-[#0B1E33] hover:bg-[#FFA242] transition-colors disabled:opacity-50 min-h-[44px]"
-              >
-                {submitting
-                  ? 'Enviando solicitud...'
-                  : product.modality === 'gift'
-                    ? 'Enviar solicitud de regalo'
-                    : 'Enviar propuesta de intercambio'}
-              </button>
-            </form>
+                  {submitting
+                    ? 'Enviando solicitud...'
+                    : product.modality === 'gift'
+                      ? 'Enviar solicitud de regalo'
+                      : 'Enviar propuesta de intercambio'}
+                </button>
+              </form>
+            )
           )}
         </div>
       </div>

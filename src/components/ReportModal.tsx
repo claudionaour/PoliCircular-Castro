@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Flag, X } from 'lucide-react';
 import { createReport } from '../services/adminService';
+import { translateFirebaseError } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 import type { ReportRecord } from '../types/domain';
 
@@ -52,7 +53,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       });
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No fue posible enviar la denuncia.');
+      setError(translateFirebaseError(err));
     } finally {
       setSubmitting(false);
     }

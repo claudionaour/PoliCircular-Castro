@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -34,6 +35,33 @@ export async function getTreeProgress(userId: string): Promise<UserTreeProgress 
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `user_tree_progress/${userId}`);
   }
+}
+
+export function subscribeTreeProgress(
+  userId: string,
+  onData: (progress: UserTreeProgress | null) => void
+): () => void {
+  return onSnapshot(
+    doc(db, 'user_tree_progress', userId),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const d = snap.data();
+      onData({
+        user_id: userId,
+        completed_operations: Number(d.completed_operations ?? 0),
+        completed_gifts: Number(d.completed_gifts ?? 0),
+        completed_exchanges: Number(d.completed_exchanges ?? 0),
+        current_stage: d.current_stage,
+        updated_at: toIsoString(d.updated_at),
+      });
+    },
+    (err) => {
+      console.warn('Error en suscripción de árbol circular:', err);
+    }
+  );
 }
 
 export async function listAllAchievements(): Promise<Achievement[]> {
@@ -87,6 +115,45 @@ export async function listUserAchievements(userId: string): Promise<UserAchievem
   }
 }
 
+export function subscribeUserAchievements(
+  userId: string,
+  onData: (achievements: UserAchievement[]) => void
+): () => void {
+  let achMapPromise: Promise<Map<string, Achievement>> | null = null;
+  const getAchMap = () => {
+    if (!achMapPromise) {
+      achMapPromise = listAllAchievements()
+        .then((list) => new Map(list.map((a) => [a.id, a])))
+        .catch(() => new Map());
+    }
+    return achMapPromise;
+  };
+
+  return onSnapshot(
+    query(collection(db, 'user_achievements'), where('user_id', '==', userId)),
+    async (uaSnap) => {
+      const achMap = await getAchMap();
+      const mapped = uaSnap.docs
+        .map((d) => {
+          const data = d.data();
+          const achId = String(data.achievement_id || '');
+          return {
+            id: d.id,
+            user_id: String(data.user_id || userId),
+            achievement_id: achId,
+            unlocked_at: toIsoString(data.unlocked_at),
+            achievements: achMap.get(achId) ?? null,
+          };
+        })
+        .sort((a, b) => new Date(b.unlocked_at).getTime() - new Date(a.unlocked_at).getTime());
+      onData(mapped);
+    },
+    (err) => {
+      console.warn('Error en suscripción de insignias:', err);
+    }
+  );
+}
+
 export async function listImpactRecords(communeId?: string): Promise<ImpactRecord[]> {
   try {
     const q = query(collection(db, 'impact_records'), where('quantity', '>=', 1));
@@ -119,6 +186,59 @@ export async function listImpactRecords(communeId?: string): Promise<ImpactRecor
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'impact_records');
   }
+}
+
+export function subscribeImpactRecords(
+  communeId: string | undefined,
+  onData: (records: ImpactRecord[]) => void
+): () => void {
+  let mapsPromise: ReturnType<typeof fetchLookupMaps> | null = null;
+  const getMaps = () => {
+    if (!mapsPromise) {
+      mapsPromise = fetchLookupMaps();
+    }
+    return mapsPromise;
+  };
+
+  return onSnapshot(
+    query(collection(db, 'impact_records'), where('quantity', '>=', 1)),
+    async (snap) => {
+      try {
+        const maps = await getMaps();
+        const items = snap.docs
+          .filter((d) => !communeId || String(d.data().commune_id || '') === communeId)
+          .map((d) => {
+            const data = d.data();
+            const cat = maps.categories.get(String(data.category_id || ''));
+            const com = maps.communes.get(String(data.commune_id || ''));
+            const sec = data.sector_id ? maps.sectors.get(String(data.sector_id)) : null;
+            return {
+              id: d.id,
+              exchange_id: String(data.exchange_id || d.id),
+              product_id: String(data.product_id || ''),
+              category_id: String(data.category_id || ''),
+              commune_id: String(data.commune_id || ''),
+              sector_id: data.sector_id ? String(data.sector_id) : null,
+              modality: data.modality,
+              quantity: Number(data.quantity ?? 1),
+              weight_kg: Number(data.weight_kg ?? 0),
+              weight_type: data.weight_type,
+              created_at: toIsoString(data.created_at),
+              categories: cat ? { name: cat.name } : null,
+              communes: com ? { name: com.name } : null,
+              sectors: sec ? { name: sec.name } : null,
+            } satisfies ImpactRecord;
+          })
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        onData(items);
+      } catch (err) {
+        console.warn('Error hidratando impacto en tiempo real:', err);
+      }
+    },
+    (err) => {
+      console.warn('Error en suscripción de impacto ambiental:', err);
+    }
+  );
 }
 
 export async function getCommunityParticipationCounts(): Promise<{

@@ -4,6 +4,7 @@ import {
   saveEducationalInstitution,
 } from '../../services/adminService';
 import { listAllCommunes } from '../../services/territorialService';
+import { translateFirebaseError } from '../../services/firebase';
 import { INSTITUTION_BADGE_LABELS } from '../../utils/formatters';
 import type { Commune, EducationalInstitution, InstitutionBadge } from '../../types/domain';
 
@@ -24,8 +25,8 @@ export const AdminEducationPage: React.FC = () => {
     ]);
     setInstitutions(insts);
     setCommunes(comms);
-    if (!communeId && comms[0]) setCommuneId(comms[0].id);
-  }, [communeId]);
+    if (comms[0]) setCommuneId((prev) => prev || comms[0].id);
+  }, []);
 
   useEffect(() => {
     load().catch(() => {});
@@ -48,7 +49,7 @@ export const AdminEducationPage: React.FC = () => {
       setResponsible('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error registrando establecimiento.');
+      setError(translateFirebaseError(err));
     }
   };
 

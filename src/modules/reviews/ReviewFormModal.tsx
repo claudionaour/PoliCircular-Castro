@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Star, X } from 'lucide-react';
 import { submitExchangeReviewRpc } from '../../services/exchangeService';
+import { translateFirebaseError } from '../../services/firebase';
 
 interface ReviewFormModalProps {
   exchangeId: string;
@@ -50,7 +51,7 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
       });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No fue posible guardar la evaluación.');
+      setError(translateFirebaseError(err));
     } finally {
       setSubmitting(false);
     }

@@ -23,19 +23,34 @@ import { PWAInstallButton } from '../components/PWAInstallButton';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 
-const SIDEBAR_ITEMS = [
-  { to: '/inicio', label: 'Inicio', icon: Home },
-  { to: '/explorar', label: 'Explorar', icon: Compass },
-  { to: '/publicar', label: 'Publicar', icon: PlusCircle },
-  { to: '/mis-publicaciones', label: 'Mis publicaciones', icon: Package },
-  { to: '/matches', label: 'Mis Match', icon: ArrowLeftRight },
-  { to: '/intercambios', label: 'Mis intercambios', icon: Truck },
-  { to: '/mi-arbol', label: 'Mi Árbol', icon: Trees },
-  { to: '/impacto', label: 'Impacto Circular', icon: BarChart3 },
-  { to: '/educacion', label: 'Centro Educativo', icon: BookOpen },
-  { to: '/notificaciones', label: 'Notificaciones', icon: Bell },
-  { to: '/perfil', label: 'Mi perfil', icon: User },
-  { to: '/configuracion', label: 'Configuración', icon: Settings },
+const SIDEBAR_GROUPS = [
+  {
+    title: 'Circular',
+    items: [
+      { to: '/inicio', label: 'Inicio', icon: Home },
+      { to: '/explorar', label: 'Explorar catálogo', icon: Compass },
+      { to: '/publicar', label: 'Publicar producto', icon: PlusCircle },
+      { to: '/matches', label: 'Mis Match y Chat', icon: ArrowLeftRight },
+    ],
+  },
+  {
+    title: 'Mi Actividad',
+    items: [
+      { to: '/mis-publicaciones', label: 'Mis productos', icon: Package },
+      { to: '/intercambios', label: 'Historial y Reseñas', icon: Truck },
+      { to: '/mi-arbol', label: 'Mi Árbol Circular', icon: Trees },
+      { to: '/impacto', label: 'Impacto Ambiental', icon: BarChart3 },
+    ],
+  },
+  {
+    title: 'Comunidad y Cuenta',
+    items: [
+      { to: '/educacion', label: 'Aprende a Circular', icon: BookOpen },
+      { to: '/notificaciones', label: 'Notificaciones', icon: Bell },
+      { to: '/perfil', label: 'Mi perfil', icon: User },
+      { to: '/configuracion', label: 'Configuración', icon: Settings },
+    ],
+  },
 ];
 
 const MOBILE_BOTTOM_TABS = [
@@ -60,36 +75,43 @@ export const AppLayout: React.FC = () => {
           </Link>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {SIDEBAR_ITEMS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
-                    isActive
-                      ? 'bg-[#F28C28] text-[#0B1E33] font-bold'
-                      : 'text-slate-200 hover:bg-[#163B61] hover:text-white'
-                  }`
-                }
-              >
-                <span className="flex items-center gap-3">
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{item.label}</span>
-                </span>
-                {item.to === '/notificaciones' && unreadCount > 0 && (
-                  <span className="font-mono text-xs font-bold tabular-nums px-1.5 py-0.5 rounded-md bg-white text-[#102C49]">
-                    {unreadCount}
-                  </span>
-                )}
-              </NavLink>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+          {SIDEBAR_GROUPS.map((group) => (
+            <div key={group.title} className="space-y-1">
+              <p className="px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                {group.title}
+              </p>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      `flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                        isActive
+                          ? 'bg-[#F28C28] text-[#0B1E33] font-bold'
+                          : 'text-slate-200 hover:bg-[#163B61] hover:text-white'
+                      }`
+                    }
+                  >
+                    <span className="flex items-center gap-3">
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </span>
+                    {item.to === '/notificaciones' && unreadCount > 0 && (
+                      <span className="font-mono text-xs font-bold tabular-nums px-1.5 py-0.5 rounded-md bg-white text-[#102C49]">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </NavLink>
+                );
+              })}
+            </div>
+          ))}
 
           {isModerator && (
-            <div className="pt-4 mt-4 border-t border-[#244B73]">
+            <div className="pt-3 border-t border-[#244B73]">
               <Link
                 to="/admin"
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#0B1E33] border border-[#244B73] hover:bg-[#163B61] transition-colors"

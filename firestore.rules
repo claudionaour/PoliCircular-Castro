@@ -659,23 +659,24 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updated_at'])
             && incoming().status == 'archived'
           ) ||
-          // Action: Owner reserving stock when accepting match request
+          // Action: Owner updating stock when accepting match request (supports direct completion on Match)
           (
             isOwner(existing().owner_id)
             && existing().status == 'approved'
-            && incoming().diff(existing()).affectedKeys().hasOnly(['available_quantity', 'reserved_quantity', 'status', 'updated_at'])
-            && incoming().status in ['approved', 'reserved']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['available_quantity', 'reserved_quantity', 'status', 'sync_exchange_id', 'updated_at'])
+            && incoming().status in ['approved', 'reserved', 'completed']
             && incoming().available_quantity + incoming().reserved_quantity <= existing().total_quantity
           ) ||
-          // Action: Exchange participant completing or cancelling reserved stock atomically
+          // Action: Exchange participant completing or cancelling stock atomically (supports direct completion on Match)
           (
             incoming().diff(existing()).affectedKeys().hasOnly(['available_quantity', 'reserved_quantity', 'status', 'sync_exchange_id', 'updated_at'])
             && incoming().status in ['approved', 'reserved', 'completed']
+            && incoming().available_quantity + incoming().reserved_quantity <= existing().total_quantity
             && isValidId(incoming().sync_exchange_id)
-            && exists(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id))
+            && existsAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id))
             && (
-              get(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.owner_id == request.auth.uid
-              || get(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.requester_id == request.auth.uid
+              getAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.owner_id == request.auth.uid
+              || getAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.requester_id == request.auth.uid
             )
             && getAfter(/databases/$(database)/documents/exchanges/$(incoming().sync_exchange_id)).data.status in ['completed', 'cancelled']
           )
@@ -748,9 +749,16 @@ service cloud.firestore {
       allow create: if isVerifiedUser() && isValidId(matchId)
         && isValidMatch(incoming(), matchId)
         && incoming().owner_id == request.auth.uid
-        && incoming().status == 'active'
         && incoming().created_at == request.time
-        && getAfter(/databases/$(database)/documents/match_requests/$(incoming().request_id)).data.status == 'accepted';
+        && getAfter(/databases/$(database)/documents/match_requests/$(incoming().request_id)).data.status == 'accepted'
+        && (
+          incoming().status == 'active'
+          || (
+            incoming().status == 'completed'
+            && existsAfter(/databases/$(database)/documents/exchanges/$('ex_' + incoming().request_id))
+            && getAfter(/databases/$(database)/documents/exchanges/$('ex_' + incoming().request_id)).data.status == 'completed'
+          )
+        );
       allow update: if isVerifiedUser() && isValidId(matchId)
         && isValidMatch(incoming(), matchId)
         && existing().status == 'active'
@@ -832,9 +840,17 @@ service cloud.firestore {
       allow create: if isVerifiedUser() && isValidId(exchangeId)
         && isValidExchange(incoming(), exchangeId)
         && incoming().owner_id == request.auth.uid
-        && incoming().status == 'pending'
         && incoming().created_at == request.time
-        && existsAfter(/databases/$(database)/documents/matches/$(incoming().match_id));
+        && existsAfter(/databases/$(database)/documents/matches/$(incoming().match_id))
+        && (
+          incoming().status == 'pending'
+          || (
+            incoming().status == 'completed'
+            && incoming().completed_at == request.time
+            && existsAfter(/databases/$(database)/documents/exchange_confirmations/$(exchangeId + '_' + incoming().owner_id))
+            && existsAfter(/databases/$(database)/documents/exchange_confirmations/$(exchangeId + '_' + incoming().requester_id))
+          )
+        );
       allow update: if isVerifiedUser() && isValidId(exchangeId)
         && isValidExchange(incoming(), exchangeId)
         && !(existing().status in ['completed', 'cancelled'])
@@ -879,13 +895,21 @@ service cloud.firestore {
         || isModerator();
       allow create: if isVerifiedUser() && isValidId(confirmationId)
         && isValidExchangeConfirmation(incoming(), confirmationId)
-        && incoming().user_id == request.auth.uid
-        && (incoming().owner_id == request.auth.uid || incoming().requester_id == request.auth.uid)
-        && confirmationId == (incoming().exchange_id + '_' + request.auth.uid)
+        && incoming().user_id in [incoming().owner_id, incoming().requester_id]
+        && confirmationId == (incoming().exchange_id + '_' + incoming().user_id)
         && incoming().confirmed_at == request.time
-        && exists(/databases/$(database)/documents/exchanges/$(incoming().exchange_id))
-        && get(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.owner_id == incoming().owner_id
-        && get(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.requester_id == incoming().requester_id;
+        && existsAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id))
+        && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.owner_id == incoming().owner_id
+        && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.requester_id == incoming().requester_id
+        && (
+          (
+            incoming().user_id == request.auth.uid
+            && (incoming().owner_id == request.auth.uid || incoming().requester_id == request.auth.uid)
+          ) || (
+            incoming().owner_id == request.auth.uid
+            && getAfter(/databases/$(database)/documents/exchanges/$(incoming().exchange_id)).data.status == 'completed'
+          )
+        );
       allow update, delete: if false;
     }
 

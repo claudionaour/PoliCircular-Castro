@@ -3,6 +3,7 @@ import { Bell, BellRing, Check, Plus, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
 import { listActiveCommunes, listCategories } from '../services/territorialService';
+import { translateFirebaseError } from '../services/firebase';
 import type { Category, Commune, ProductModality } from '../types/domain';
 
 interface ProductAlertSettingsCardProps {
@@ -142,7 +143,7 @@ export const ProductAlertSettingsCard: React.FC<ProductAlertSettingsCardProps> =
     } catch (err) {
       setFeedback({
         type: 'err',
-        text: err instanceof Error ? err.message : 'No se pudieron guardar tus preferencias.',
+        text: translateFirebaseError(err),
       });
     } finally {
       setSaving(false);

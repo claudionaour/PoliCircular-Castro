@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { listAllCommunes, listSectorsByCommune } from '../../services/territorialService';
 import { saveCommuneAdmin, saveSectorAdmin } from '../../services/adminService';
 import { ensureInitialTerritorialSeed } from '../../services/seedService';
+import { translateFirebaseError } from '../../services/firebase';
 import type { Commune, Sector } from '../../types/domain';
 
 export const AdminTerritorialPage: React.FC = () => {
@@ -18,10 +19,10 @@ export const AdminTerritorialPage: React.FC = () => {
   const loadCommunes = useCallback(async () => {
     const list = await listAllCommunes();
     setCommunes(list);
-    if (!selectedCommuneId && list[0]) {
-      setSelectedCommuneId(list[0].id);
+    if (list[0]) {
+      setSelectedCommuneId((prev) => prev || list[0].id);
     }
-  }, [selectedCommuneId]);
+  }, []);
 
   useEffect(() => {
     loadCommunes().catch(() => {});
@@ -43,7 +44,7 @@ export const AdminTerritorialPage: React.FC = () => {
       await saveCommuneAdmin({ ...c, is_active: !c.is_active });
       await loadCommunes();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No autorizado para editar comunas.');
+      setError(translateFirebaseError(err));
     }
   };
 
@@ -60,7 +61,7 @@ export const AdminTerritorialPage: React.FC = () => {
       setNewCommuneName('');
       await loadCommunes();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error creando comuna.');
+      setError(translateFirebaseError(err));
     }
   };
 
@@ -79,7 +80,7 @@ export const AdminTerritorialPage: React.FC = () => {
       setNewSectorDesc('');
       await loadSectors();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error creando sector.');
+      setError(translateFirebaseError(err));
     }
   };
 
@@ -97,7 +98,7 @@ export const AdminTerritorialPage: React.FC = () => {
       });
       await loadSectors();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error actualizando sector.');
+      setError(translateFirebaseError(err));
     }
   };
 
@@ -119,7 +120,7 @@ export const AdminTerritorialPage: React.FC = () => {
               await loadCommunes();
               await loadSectors();
             } catch (err) {
-              setError(err instanceof Error ? err.message : 'No fue posible cargar el catálogo base.');
+              setError(translateFirebaseError(err));
             }
           }}
           className="px-4 py-2 rounded-xl bg-[#1E7E48] text-white text-xs font-semibold hover:bg-[#239454] self-start"

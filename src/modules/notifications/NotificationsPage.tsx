@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bell, CheckCheck, Sparkles } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { useNotifications } from '../../context/NotificationContext';
 import { ProductAlertSettingsCard } from '../../components/ProductAlertSettingsCard';
 import { formatChileDateTime } from '../../utils/formatters';
@@ -8,8 +8,10 @@ import { formatChileDateTime } from '../../utils/formatters';
 type NotifFilter = 'all' | 'new_products' | 'unread';
 
 export const NotificationsPage: React.FC = () => {
-  const { notifications, unreadCount, loading, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications, unreadCount, loading, alertSubscription, markAsRead, markAllAsRead } =
+    useNotifications();
   const [filter, setFilter] = useState<NotifFilter>('all');
+  const [showAlertConfig, setShowAlertConfig] = useState(false);
 
   const filtered = useMemo(() => {
     if (filter === 'new_products') {
@@ -27,24 +29,50 @@ export const NotificationsPage: React.FC = () => {
         <div>
           <h1 className="font-display text-2xl font-bold text-white">Notificaciones y Alertas</h1>
           <p className="text-sm text-slate-300 tabular-nums">
-            {unreadCount} sin leer · Avisos en tiempo real de nuevos productos, solicitudes y logros
+            {unreadCount} sin leer · Avisos en tiempo real de nuevos productos, Match y logros
           </p>
         </div>
 
-        {unreadCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2 self-start">
           <button
             type="button"
-            onClick={() => markAllAsRead()}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-xs font-semibold text-white hover:bg-[#163B61] self-start"
+            onClick={() => setShowAlertConfig((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+              alertSubscription?.enabled
+                ? 'border-[#34D399]/50 bg-[#143D29] text-[#6EE7B7] hover:bg-[#194A32]'
+                : 'border-[#3B648F] bg-[#0B1E33] text-white hover:bg-[#163B61]'
+            }`}
           >
-            <CheckCheck className="h-4 w-4 text-[#6EE7B7]" />
-            <span>Marcar todas como leídas</span>
+            <BellRing className="h-4 w-4" />
+            <span>
+              {alertSubscription?.enabled
+                ? 'Alertas activas · Configurar'
+                : 'Configurar alertas de nuevos productos'}
+            </span>
+            {showAlertConfig ? (
+              <ChevronUp className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
           </button>
-        )}
+
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => markAllAsRead()}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-xs font-semibold text-white hover:bg-[#163B61]"
+            >
+              <CheckCheck className="h-4 w-4 text-[#6EE7B7]" />
+              <span>Marcar todas leídas</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Configuración de alertas para nuevos productos publicados */}
-      <ProductAlertSettingsCard />
+      {/* Configuración colapsable de alertas para nuevos productos publicados */}
+      {showAlertConfig && (
+        <ProductAlertSettingsCard onSaved={() => setShowAlertConfig(false)} />
+      )}
 
       {/* Filtro del historial */}
       <div className="flex flex-wrap items-center gap-2">

@@ -7,6 +7,7 @@ import {
   Layers,
   LayoutGrid,
   List,
+  PlusCircle,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -22,7 +23,7 @@ import {
   listSectorsByCommune,
 } from '../../services/territorialService';
 import { upsertProductInterest } from '../../services/matchingService';
-import { isFirebaseConfigured } from '../../services/firebase';
+import { isFirebaseConfigured, translateFirebaseError } from '../../services/firebase';
 import { ImageWithFallback } from '../../components/ImageWithFallback';
 import { ProductAlertSettingsCard } from '../../components/ProductAlertSettingsCard';
 import {
@@ -141,8 +142,28 @@ export const ExplorePage: React.FC = () => {
         setSwipeIndex((idx) => idx + 1);
       }
     } catch (err) {
-      setFeedback(err instanceof Error ? err.message : 'No fue posible guardar tu acción.');
+      setFeedback(translateFirebaseError(err));
     }
+  };
+
+  const hasActiveFilters = Boolean(
+    search.trim() ||
+      categoryId ||
+      communeId ||
+      sectorId ||
+      modality ||
+      condition ||
+      dateRange !== 'all'
+  );
+
+  const clearFilters = () => {
+    setSearch('');
+    setCategoryId('');
+    setCommuneId('');
+    setSectorId('');
+    setModality('');
+    setCondition('');
+    setDateRange('all');
   };
 
   const currentSwipeProduct = products[swipeIndex];
@@ -183,20 +204,29 @@ export const ExplorePage: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2 self-start">
           {user && (
-            <button
-              type="button"
-              onClick={() => setShowAlertPanel((v) => !v)}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
-                alertSubscription?.enabled
-                  ? 'border-[#34D399]/50 bg-[#143D29] text-[#6EE7B7] hover:bg-[#194A32]'
-                  : 'border-[#F28C28]/60 bg-[#102C49] text-[#FFA94D] hover:bg-[#163B61]'
-              }`}
-            >
-              <BellRing className="h-4 w-4" />
-              <span>
-                {alertSubscription?.enabled ? 'Alertas activas' : 'Recibir alertas de nuevos'}
-              </span>
-            </button>
+            <>
+              <Link
+                to="/publicar"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242] transition-colors whitespace-nowrap"
+              >
+                <PlusCircle className="h-4 w-4" />
+                <span>Publicar</span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => setShowAlertPanel((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap ${
+                  alertSubscription?.enabled
+                    ? 'border-[#34D399]/50 bg-[#143D29] text-[#6EE7B7] hover:bg-[#194A32]'
+                    : 'border-[#F28C28]/60 bg-[#102C49] text-[#FFA94D] hover:bg-[#163B61]'
+                }`}
+              >
+                <BellRing className="h-4 w-4" />
+                <span>
+                  {alertSubscription?.enabled ? 'Alertas activas' : 'Recibir alertas'}
+                </span>
+              </button>
+            </>
           )}
 
           <div className="flex items-center gap-1 p-1 bg-[#102C49] border border-[#244B73] rounded-xl">
@@ -292,6 +322,16 @@ export const ExplorePage: React.FC = () => {
             <SlidersHorizontal className="h-4 w-4 text-[#FFA94D]" />
             <span>Filtros</span>
           </button>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-xs font-semibold text-slate-200 hover:text-white min-h-[44px]"
+            >
+              <X className="h-4 w-4" />
+              <span>Limpiar</span>
+            </button>
+          )}
         </div>
 
         {showFilters && (
@@ -405,14 +445,25 @@ export const ExplorePage: React.FC = () => {
               ? 'Prueba limpiando los filtros o publica un objeto ahora mismo para darle una segunda oportunidad.'
               : 'Cuando configures Firebase, los productos publicados aparecerán aquí al instante.'}
           </p>
-          {user && (
-            <Link
-              to="/publicar"
-              className="inline-block px-5 py-2.5 rounded-xl bg-[#F28C28] text-[#0B1E33] text-sm font-bold"
-            >
-              Publicar producto
-            </Link>
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-4 py-2.5 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-sm font-semibold text-white hover:bg-[#163B61]"
+              >
+                Limpiar filtros
+              </button>
+            )}
+            {user && (
+              <Link
+                to="/publicar"
+                className="inline-block px-5 py-2.5 rounded-xl bg-[#F28C28] text-[#0B1E33] text-sm font-bold"
+              >
+                Publicar producto
+              </Link>
+            )}
+          </div>
         </div>
       ) : viewMode === 'swipe' ? (
         <div className="max-w-md mx-auto py-4">

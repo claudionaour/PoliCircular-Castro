@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   runTransaction,
   serverTimestamp,
@@ -28,6 +29,8 @@ import {
   fetchProfilesMap,
   hydrateProductDoc,
 } from './firestoreHelpers';
+import { SEED_CATEGORIES } from './seedService';
+import { computeTreeStage } from '../utils/formatters';
 import type {
   Conversation,
   ExchangeConfirmation,
@@ -115,6 +118,36 @@ export async function createMatchRequest(params: {
   requestedQuantity: number;
   message?: string;
 }): Promise<MatchRequest> {
+  if (params.requesterId === params.ownerId) {
+    throw new Error('No puedes enviar una solicitud sobre tu propia publicación.');
+  }
+  if (!Number.isInteger(params.requestedQuantity) || params.requestedQuantity < 1) {
+    throw new Error('La cantidad solicitada debe ser al menos 1.');
+  }
+
+  // Evitar solicitudes duplicadas activas sobre el mismo producto
+  try {
+    const myReqsSnap = await getDocs(
+      query(collection(db, 'match_requests'), where('requester_id', '==', params.requesterId))
+    );
+    const hasPending = myReqsSnap.docs.some((d) => {
+      const data = d.data();
+      return (
+        String(data.target_product_id) === params.targetProductId &&
+        ['pending', 'chat_requested'].includes(String(data.status))
+      );
+    });
+    if (hasPending) {
+      throw new Error(
+        'Ya tienes una solicitud pendiente para este producto. Puedes revisarla en Mis Match.'
+      );
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('solicitud pendiente')) {
+      throw err;
+    }
+  }
+
   const reqRef = doc(collection(db, 'match_requests'));
   const notifRef = doc(collection(db, 'notifications'));
 
@@ -254,39 +287,131 @@ export async function acceptMatchRequestRpc(requestId: string): Promise<string> 
   const currentUid = auth.currentUser?.uid;
   if (!currentUid) throw new Error('Debes iniciar sesión.');
 
+  // IDs determinísticos para garantizar idempotencia ante reintentos o dobles clics
   const reqRef = doc(db, 'match_requests', requestId);
+  const matchId = `match_${requestId}`;
+  const convId = `conv_${requestId}`;
+  const exchangeId = `ex_${requestId}`;
+  const notifReqId = `notif_req_${requestId}`;
+  const notifOwnerId = `notif_own_${requestId}`;
+
+  const achievementsSnap = await getDocs(collection(db, 'achievements')).catch(() => null);
 
   try {
-    return await runTransaction(db, async (tx) => {
+    const txResult = await runTransaction(db, async (tx) => {
+      // 1. TODAS LAS LECTURAS ANTES DE CUALQUIER ESCRITURA
       const reqSnap = await tx.get(reqRef);
       if (!reqSnap.exists()) throw new Error('Solicitud no encontrada.');
       const reqData = reqSnap.data();
 
-      if (reqData.owner_id !== currentUid) {
+      const ownerId = String(reqData.owner_id);
+      const requesterId = String(reqData.requester_id);
+
+      if (ownerId !== currentUid) {
         throw new Error('Solo quien publicó el producto puede aceptar la solicitud.');
       }
+
+      const matchRef = doc(db, 'matches', matchId);
+      const convRef = doc(db, 'conversations', convId);
+      const exchangeRef = doc(db, 'exchanges', exchangeId);
+      const ownerConfId = `${exchangeId}_${ownerId}`;
+      const requesterConfId = `${exchangeId}_${requesterId}`;
+      const ownerConfRef = doc(db, 'exchange_confirmations', ownerConfId);
+      const requesterConfRef = doc(db, 'exchange_confirmations', requesterConfId);
+      const impactRef = doc(db, 'impact_records', exchangeId);
+      const notifReqRef = doc(db, 'notifications', notifReqId);
+      const notifOwnRef = doc(db, 'notifications', notifOwnerId);
+      const ownerTreeRef = doc(db, 'user_tree_progress', ownerId);
+      const requesterTreeRef = doc(db, 'user_tree_progress', requesterId);
+      const productRef = doc(db, 'products', String(reqData.target_product_id));
+
+      const [
+        existingMatchSnap,
+        existingConvSnap,
+        existingExSnap,
+        existingOwnerConfSnap,
+        existingReqConfSnap,
+        existingImpactSnap,
+        existingNotifReqSnap,
+        existingNotifOwnSnap,
+        productSnap,
+        ownerTreeSnap,
+        requesterTreeSnap,
+      ] = await Promise.all([
+        tx.get(matchRef),
+        tx.get(convRef),
+        tx.get(exchangeRef),
+        tx.get(ownerConfRef),
+        tx.get(requesterConfRef),
+        tx.get(impactRef),
+        tx.get(notifReqRef),
+        tx.get(notifOwnRef),
+        tx.get(productRef),
+        tx.get(ownerTreeRef),
+        tx.get(requesterTreeRef),
+      ]);
+
+      // Guard de idempotencia: si el Match completo ya fue aplicado en un intento previo, retornar directamente
+      if (
+        reqData.status === 'accepted' &&
+        existingMatchSnap.exists() &&
+        existingExSnap.exists() &&
+        existingImpactSnap.exists()
+      ) {
+        return { matchId, participantUpdates: [] as { uid: string; nextOps: number }[] };
+      }
+
       if (!['pending', 'chat_requested'].includes(reqData.status)) {
         throw new Error('La solicitud ya fue procesada.');
       }
 
-      const productRef = doc(db, 'products', String(reqData.target_product_id));
-      const productSnap = await tx.get(productRef);
       if (!productSnap.exists()) throw new Error('Publicación no encontrada.');
       const prod = productSnap.data();
 
+      const catSnap = await tx.get(doc(db, 'categories', String(prod.category_id)));
+      const fallbackCatWeight =
+        SEED_CATEGORIES.find((c) => c.id === String(prod.category_id))?.estimated_weight_kg ?? 1;
+      const catWeight = catSnap.exists()
+        ? Number(catSnap.data().estimated_weight_kg ?? fallbackCatWeight)
+        : fallbackCatWeight;
+
       const qty = Number(reqData.requested_quantity ?? 1);
-      if (prod.status !== 'approved' || Number(prod.available_quantity) < qty) {
-        throw new Error('No queda suficiente cantidad disponible para reservar.');
+      const available = Number(prod.available_quantity ?? 0);
+      if (prod.status !== 'approved' || available < qty) {
+        throw new Error('No queda suficiente cantidad disponible para completar este Match.');
       }
 
-      const nextAvailable = Number(prod.available_quantity) - qty;
-      const nextReserved = Number(prod.reserved_quantity) + qty;
+      const nextAvailable = available - qty;
+      const currentReserved = Number(prod.reserved_quantity ?? 0);
+      const nextProdStatus =
+        nextAvailable === 0 && currentReserved === 0 ? 'completed' : 'approved';
 
-      const matchRef = doc(collection(db, 'matches'));
-      const convRef = doc(collection(db, 'conversations'));
-      const exchangeRef = doc(collection(db, 'exchanges'));
-      const notifRef = doc(collection(db, 'notifications'));
+      const isGift = reqData.modality === 'gift';
 
+      const buildTreeUpdate = (
+        uid: string,
+        snap: typeof ownerTreeSnap
+      ) => {
+        const prev = snap.exists()
+          ? snap.data()
+          : { completed_operations: 0, completed_gifts: 0, completed_exchanges: 0, last_exchange_id: '' };
+        const alreadyApplied = String(prev.last_exchange_id || '') === exchangeId;
+        const prevOps = Number(prev.completed_operations ?? 0);
+        const nextOps = alreadyApplied ? prevOps : prevOps + 1;
+        return {
+          uid,
+          alreadyApplied,
+          nextOps,
+          nextGifts: Number(prev.completed_gifts ?? 0) + (alreadyApplied ? 0 : isGift ? 1 : 0),
+          nextEx: Number(prev.completed_exchanges ?? 0) + (alreadyApplied ? 0 : isGift ? 0 : 1),
+        };
+      };
+
+      const ownerProgress = buildTreeUpdate(ownerId, ownerTreeSnap);
+      const requesterProgress = buildTreeUpdate(requesterId, requesterTreeSnap);
+      const participantUpdates = [ownerProgress, requesterProgress];
+
+      // 2. ESCRITURAS ATÓMICAS: MATCH + CONFIRMACIÓN AUTOMÁTICA + ESTADÍSTICAS
       tx.update(reqRef, {
         status: 'accepted',
         updated_at: serverTimestamp(),
@@ -294,59 +419,188 @@ export async function acceptMatchRequestRpc(requestId: string): Promise<string> 
 
       tx.update(productRef, {
         available_quantity: nextAvailable,
-        reserved_quantity: nextReserved,
-        status: nextAvailable === 0 ? 'reserved' : 'approved',
+        reserved_quantity: currentReserved,
+        status: nextProdStatus,
+        sync_exchange_id: exchangeId,
         updated_at: serverTimestamp(),
       });
 
-      tx.set(matchRef, {
-        id: matchRef.id,
-        request_id: requestId,
-        target_product_id: reqData.target_product_id,
-        offered_product_id: reqData.offered_product_id || null,
-        owner_id: reqData.owner_id,
-        requester_id: reqData.requester_id,
-        modality: reqData.modality,
-        quantity_reserved: qty,
-        status: 'active',
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
-      });
+      if (!existingMatchSnap.exists()) {
+        tx.set(matchRef, {
+          id: matchId,
+          request_id: requestId,
+          target_product_id: reqData.target_product_id,
+          offered_product_id: reqData.offered_product_id || null,
+          owner_id: ownerId,
+          requester_id: requesterId,
+          modality: reqData.modality,
+          quantity_reserved: qty,
+          status: 'completed',
+          created_at: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        });
+      }
 
-      tx.set(convRef, {
-        id: convRef.id,
-        match_id: matchRef.id,
-        participant_a: reqData.owner_id,
-        participant_b: reqData.requester_id,
-        is_blocked: false,
-        blocked_by: null,
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
-      });
+      if (!existingConvSnap.exists()) {
+        tx.set(convRef, {
+          id: convId,
+          match_id: matchId,
+          participant_a: ownerId,
+          participant_b: requesterId,
+          is_blocked: false,
+          blocked_by: null,
+          created_at: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        });
+      }
 
-      tx.set(exchangeRef, {
-        id: exchangeRef.id,
-        match_id: matchRef.id,
-        owner_id: reqData.owner_id,
-        requester_id: reqData.requester_id,
-        status: 'pending',
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
-      });
+      if (!existingExSnap.exists()) {
+        tx.set(exchangeRef, {
+          id: exchangeId,
+          match_id: matchId,
+          owner_id: ownerId,
+          requester_id: requesterId,
+          status: 'completed',
+          completed_at: serverTimestamp(),
+          created_at: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        });
+      }
 
-      tx.set(notifRef, {
-        id: notifRef.id,
-        user_id: reqData.requester_id,
-        event_type: 'match_accepted',
-        title: '¡Tienes un nuevo Match Circular!',
-        body: `Aceptaron tu solicitud por “${prod.title}”. Ya puedes coordinar la entrega.`,
-        link_path: `/matches/${matchRef.id}`,
-        is_read: false,
-        created_at: serverTimestamp(),
-      });
+      if (!existingOwnerConfSnap.exists()) {
+        tx.set(ownerConfRef, {
+          id: ownerConfId,
+          exchange_id: exchangeId,
+          user_id: ownerId,
+          owner_id: ownerId,
+          requester_id: requesterId,
+          confirmed_at: serverTimestamp(),
+          notes: 'Confirmación automática al realizar Match',
+          measured_weight_kg: null,
+        });
+      }
 
-      return matchRef.id;
+      if (!existingReqConfSnap.exists()) {
+        tx.set(requesterConfRef, {
+          id: requesterConfId,
+          exchange_id: exchangeId,
+          user_id: requesterId,
+          owner_id: ownerId,
+          requester_id: requesterId,
+          confirmed_at: serverTimestamp(),
+          notes: 'Confirmación automática al realizar Match',
+          measured_weight_kg: null,
+        });
+      }
+
+      for (const p of participantUpdates) {
+        if (!p.alreadyApplied) {
+          tx.set(doc(db, 'user_tree_progress', p.uid), {
+            user_id: p.uid,
+            completed_operations: p.nextOps,
+            completed_gifts: p.nextGifts,
+            completed_exchanges: p.nextEx,
+            current_stage: computeTreeStage(p.nextOps),
+            last_exchange_id: exchangeId,
+            updated_at: serverTimestamp(),
+          });
+        }
+      }
+
+      if (!existingImpactSnap.exists()) {
+        const estimatedWeight = Number((catWeight * qty).toFixed(2));
+        tx.set(impactRef, {
+          id: exchangeId,
+          exchange_id: exchangeId,
+          product_id: String(prod.id),
+          category_id: String(prod.category_id),
+          commune_id: String(prod.commune_id),
+          sector_id: prod.sector_id ? String(prod.sector_id) : null,
+          modality: reqData.modality,
+          quantity: qty,
+          weight_kg: estimatedWeight,
+          weight_type: 'estimated',
+          created_at: serverTimestamp(),
+        });
+      }
+
+      const safeTitle = String(prod.title || 'Producto').slice(0, 80);
+
+      if (!existingNotifReqSnap.exists()) {
+        tx.set(notifReqRef, {
+          id: notifReqId,
+          user_id: requesterId,
+          event_type: 'match_accepted',
+          title: '¡Match confirmado automáticamente!',
+          body: `Aceptaron tu solicitud por “${safeTitle}”. La entrega se confirmó y sumó a tu Árbol Circular; ya pueden coordinar el retiro por chat.`,
+          link_path: `/matches/${matchId}`,
+          is_read: false,
+          created_at: serverTimestamp(),
+        });
+      }
+
+      if (!existingNotifOwnSnap.exists()) {
+        tx.set(notifOwnRef, {
+          id: notifOwnerId,
+          user_id: ownerId,
+          event_type: 'match_completed_stats',
+          title: 'Match registrado en tus estadísticas',
+          body: `“${safeTitle}” se confirmó automáticamente y sumó +1 operación a tu Árbol Circular e Impacto Ambiental.`,
+          link_path: '/mi-arbol',
+          is_read: false,
+          created_at: serverTimestamp(),
+        });
+      }
+
+      return {
+        matchId,
+        participantUpdates: participantUpdates.map((p) => ({ uid: p.uid, nextOps: p.nextOps })),
+      };
     });
+
+    // Desbloqueo idempotente de insignias sin sobrecargar el límite de lecturas de la transacción principal
+    if (achievementsSnap && !achievementsSnap.empty && txResult.participantUpdates.length > 0) {
+      const candidates: { recId: string; uid: string; achId: string }[] = [];
+      for (const p of txResult.participantUpdates) {
+        for (const achDoc of achievementsSnap.docs) {
+          const reqOps = Number(achDoc.data().required_operations ?? 1);
+          if (p.nextOps >= reqOps) {
+            candidates.push({
+              recId: `${p.uid}_${achDoc.id}`,
+              uid: p.uid,
+              achId: achDoc.id,
+            });
+          }
+        }
+      }
+
+      if (candidates.length > 0) {
+        const existingChecks = await Promise.all(
+          candidates.map((c) => getDoc(doc(db, 'user_achievements', c.recId)).catch(() => null))
+        );
+        const batch = writeBatch(db);
+        let hasNew = false;
+        candidates.forEach((c, idx) => {
+          if (existingChecks[idx] && !existingChecks[idx]!.exists()) {
+            hasNew = true;
+            batch.set(doc(db, 'user_achievements', c.recId), {
+              id: c.recId,
+              user_id: c.uid,
+              achievement_id: c.achId,
+              exchange_id: exchangeId,
+              unlocked_at: serverTimestamp(),
+            });
+          }
+        });
+        if (hasNew) {
+          await batch.commit().catch((err) => {
+            console.warn('No se pudieron registrar insignias secundarias:', err);
+          });
+        }
+      }
+    }
+
+    return txResult.matchId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `match_requests/${requestId}`);
   }
@@ -547,4 +801,48 @@ export async function getMatchDetail(matchId: string): Promise<MatchRecord | nul
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `matches/${matchId}`);
   }
+}
+
+export function subscribeUserMatchActivity(
+  userId: string,
+  onChange: () => void
+): () => void {
+  let first = [true, true, true, true];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const trigger = (idx: number) => {
+    if (first[idx]) {
+      first[idx] = false;
+      return;
+    }
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(onChange, 150);
+  };
+
+  const unsubs = [
+    onSnapshot(
+      query(collection(db, 'match_requests'), where('owner_id', '==', userId)),
+      () => trigger(0),
+      () => {}
+    ),
+    onSnapshot(
+      query(collection(db, 'match_requests'), where('requester_id', '==', userId)),
+      () => trigger(1),
+      () => {}
+    ),
+    onSnapshot(
+      query(collection(db, 'matches'), where('owner_id', '==', userId)),
+      () => trigger(2),
+      () => {}
+    ),
+    onSnapshot(
+      query(collection(db, 'matches'), where('requester_id', '==', userId)),
+      () => trigger(3),
+      () => {}
+    ),
+  ];
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    unsubs.forEach((u) => u());
+  };
 }

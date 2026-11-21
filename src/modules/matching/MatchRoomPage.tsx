@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   Ban,
   CheckCheck,
+  CheckCircle2,
   Flag,
   Send,
   ShieldAlert,
+  Star,
   Truck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -18,8 +20,13 @@ import {
   subscribeToConversationMessages,
   toggleConversationBlock,
 } from '../../services/chatService';
-import { cancelExchangeAgreementRpc } from '../../services/exchangeService';
+import {
+  cancelExchangeAgreementRpc,
+  listMySubmittedReviewExchangeIds,
+} from '../../services/exchangeService';
+import { translateFirebaseError } from '../../services/firebase';
 import { ReportModal } from '../../components/ReportModal';
+import { ReviewFormModal } from '../reviews/ReviewFormModal';
 import { EXCHANGE_STATUS_LABELS, formatChileDateTime } from '../../utils/formatters';
 import type { Conversation, MatchRecord, Message } from '../../types/domain';
 
@@ -35,6 +42,8 @@ export const MatchRoomPage: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [showReview, setShowReview] = useState(false);
+  const [hasReviewed, setHasReviewed] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -42,8 +51,13 @@ export const MatchRoomPage: React.FC = () => {
     if (!matchId || !user) return;
     setLoading(true);
     try {
-      const m = await getMatchDetail(matchId);
+      const [m, revIds] = await Promise.all([
+        getMatchDetail(matchId),
+        listMySubmittedReviewExchangeIds(user.uid),
+      ]);
       setMatch(m);
+      const exId = m?.exchanges?.[0]?.id;
+      setHasReviewed(Boolean(exId && revIds.includes(exId)));
       const conv = m?.conversations?.[0] ?? null;
       setConversation(conv);
       if (conv) {
@@ -52,7 +66,7 @@ export const MatchRoomPage: React.FC = () => {
         await markConversationMessagesRead(conv.id, user.uid);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No fue posible abrir la conversación.');
+      setError(translateFirebaseError(err));
     } finally {
       setLoading(false);
     }
@@ -62,10 +76,13 @@ export const MatchRoomPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  const conversationId = conversation?.id;
+  const userId = user?.uid;
+
   useEffect(() => {
-    if (!conversation || !user) return;
+    if (!conversationId || !userId) return;
     const channel = subscribeToConversationMessages(
-      conversation.id,
+      conversationId,
       (incoming) => {
         // Handler idempotente ordenado cronológicamente
         setMessages((prev) => {
@@ -74,8 +91,8 @@ export const MatchRoomPage: React.FC = () => {
             (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
           );
         });
-        if (incoming.sender_id !== user.uid) {
-          markConversationMessagesRead(conversation.id, user.uid).catch(() => {});
+        if (incoming.sender_id !== userId) {
+          markConversationMessagesRead(conversationId, userId).catch(() => {});
         }
       },
       (updated) => {
@@ -86,7 +103,7 @@ export const MatchRoomPage: React.FC = () => {
     return () => {
       channel.unsubscribe();
     };
-  }, [conversation, user]);
+  }, [conversationId, userId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -102,7 +119,7 @@ export const MatchRoomPage: React.FC = () => {
       setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]));
       setDraft('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo enviar el mensaje.');
+      setError(translateFirebaseError(err));
     } finally {
       setSending(false);
     }
@@ -110,9 +127,14 @@ export const MatchRoomPage: React.FC = () => {
 
   const handleBlockToggle = async () => {
     if (!conversation || !user) return;
+    setError(null);
     const nextBlock = !conversation.is_blocked;
-    await toggleConversationBlock(conversation.id, user.uid, nextBlock);
-    setConversation({ ...conversation, is_blocked: nextBlock, blocked_by: nextBlock ? user.uid : null });
+    try {
+      await toggleConversationBlock(conversation.id, user.uid, nextBlock);
+      setConversation({ ...conversation, is_blocked: nextBlock, blocked_by: nextBlock ? user.uid : null });
+    } catch (err) {
+      setError(translateFirebaseError(err));
+    }
   };
 
   const handleCancelAgreement = async () => {
@@ -122,7 +144,7 @@ export const MatchRoomPage: React.FC = () => {
       await cancelExchangeAgreementRpc(exchange.id, 'Cancelado desde el chat del Match');
       await loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cancelar el acuerdo.');
+      setError(translateFirebaseError(err));
     }
   };
 
@@ -157,15 +179,40 @@ export const MatchRoomPage: React.FC = () => {
         </Link>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/intercambios"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242]"
-          >
-            <Truck className="h-4 w-4" />
-            <span>
-              Coordinar entrega ({exchange ? EXCHANGE_STATUS_LABELS[exchange.status] : 'Pendiente'})
-            </span>
-          </Link>
+          {exchange?.status === 'completed' ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#143D29] border border-[#34D399]/35 text-xs font-semibold text-[#6EE7B7]">
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Confirmado · Sumado a tu Árbol</span>
+              </span>
+              {!hasReviewed && (
+                <button
+                  type="button"
+                  onClick={() => setShowReview(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242]"
+                >
+                  <Star className="h-4 w-4" />
+                  <span>Evaluar</span>
+                </button>
+              )}
+              <Link
+                to="/intercambios"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#3B648F] bg-[#102C49] text-xs font-semibold text-white hover:bg-[#163B61]"
+              >
+                <span>Historial</span>
+              </Link>
+            </>
+          ) : (
+            <Link
+              to="/intercambios"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242]"
+            >
+              <Truck className="h-4 w-4" />
+              <span>
+                Historial ({exchange ? EXCHANGE_STATUS_LABELS[exchange.status] : 'Pendiente'})
+              </span>
+            </Link>
+          )}
           <button
             type="button"
             onClick={handleBlockToggle}
@@ -292,6 +339,18 @@ export const MatchRoomPage: React.FC = () => {
           targetId={conversation.id}
           targetTitle={`Conversación con ${other?.full_name}`}
           onClose={() => setShowReport(false)}
+        />
+      )}
+
+      {showReview && exchange && (
+        <ReviewFormModal
+          exchangeId={exchange.id}
+          targetName={other?.full_name || 'Participante'}
+          onClose={() => setShowReview(false)}
+          onSuccess={() => {
+            setShowReview(false);
+            setHasReviewed(true);
+          }}
         />
       )}
     </div>
