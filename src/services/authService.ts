@@ -46,6 +46,19 @@ const BOOTSTRAP_SUPER_ADMIN_EMAILS = new Set([
 ]);
 
 const bootstrapInFlight = new Map<string, Promise<void>>();
+const pendingRegistrationsByEmail = new Map<string, Promise<void>>();
+let pendingGoogleDefaults: BootstrapProfileDetails | undefined;
+
+export interface BootstrapProfileDetails {
+  accountType?: AccountType;
+  institutionName?: string;
+  institutionDescription?: string;
+  responsiblePerson?: string;
+  institutionalCode?: string;
+  communeId?: string;
+  sectorId?: string;
+  privatePhone?: string;
+}
 
 export interface RegisterPayload {
   email: string;
@@ -104,7 +117,11 @@ export async function initializeUserDocuments(
 ): Promise<void> {
   const uid = firebaseUser.uid;
   const userRef = doc(db, 'users', uid);
-  const existing = await getDoc(userRef);
+  const treeRef = doc(db, 'user_tree_progress', uid);
+  const [existing, treeExisting] = await Promise.all([
+    getDoc(userRef),
+    getDoc(treeRef).catch(() => null),
+  ]);
   if (existing.exists()) return;
 
   const { communeName, communeRegion, sectorName } = await resolveTerritorialLabels(
@@ -127,6 +144,11 @@ export async function initializeUserDocuments(
   const safeFullName =
     cleanFullName.length >= 2 ? cleanFullName.slice(0, 120) : 'Participante PoliCircular';
 
+  const clampOpt = (val: string | undefined, max: number): string | null => {
+    const trimmed = val?.trim();
+    return trimmed ? trimmed.slice(0, max) : null;
+  };
+
   const batch = writeBatch(db);
   batch.set(userRef, {
     id: uid,
@@ -135,18 +157,18 @@ export async function initializeUserDocuments(
     avatar_url: firebaseUser.photoURL ? firebaseUser.photoURL.slice(0, 2000) : null,
     bio: null,
     commune_id: details.communeId || 'castro',
-    commune_name: communeName || 'Castro',
-    commune_region: communeRegion || 'Región de Los Lagos',
+    commune_name: (communeName || 'Castro').slice(0, 100),
+    commune_region: (communeRegion || 'Región de Los Lagos').slice(0, 100),
     sector_id: details.sectorId || null,
-    sector_name: sectorName || null,
+    sector_name: sectorName ? sectorName.slice(0, 120) : null,
     account_type: details.accountType || 'individual',
     institution_id: null,
-    institution_name: details.institutionName?.trim() || null,
-    institution_description: details.institutionDescription?.trim() || null,
-    responsible_person: details.responsiblePerson?.trim() || null,
-    institutional_code: details.institutionalCode?.trim() || null,
+    institution_name: clampOpt(details.institutionName, 160),
+    institution_description: clampOpt(details.institutionDescription, 500),
+    responsible_person: clampOpt(details.responsiblePerson, 120),
+    institutional_code: clampOpt(details.institutionalCode, 60),
     is_minor_supervised: Boolean(details.isMinorSupervised),
-    guardian_authorization_note: details.guardianAuthorizationNote?.trim() || null,
+    guardian_authorization_note: clampOpt(details.guardianAuthorizationNote, 240),
     is_suspended: false,
     suspension_reason: null,
     reputation_avg: 0,
@@ -158,19 +180,21 @@ export async function initializeUserDocuments(
 
   batch.set(doc(db, 'users', uid, 'private', 'contact'), {
     user_id: uid,
-    private_email: firebaseUser.email || null,
-    private_phone: details.privatePhone?.trim() || null,
+    private_email: clampOpt(firebaseUser.email || undefined, 200),
+    private_phone: clampOpt(details.privatePhone, 40),
     updated_at: serverTimestamp(),
   });
 
-  batch.set(doc(db, 'user_tree_progress', uid), {
-    user_id: uid,
-    completed_operations: 0,
-    completed_gifts: 0,
-    completed_exchanges: 0,
-    current_stage: 'semilla',
-    updated_at: serverTimestamp(),
-  });
+  if (!treeExisting?.exists()) {
+    batch.set(treeRef, {
+      user_id: uid,
+      completed_operations: 0,
+      completed_gifts: 0,
+      completed_exchanges: 0,
+      current_stage: 'semilla',
+      updated_at: serverTimestamp(),
+    });
+  }
 
   await batch.commit();
 }
@@ -185,33 +209,45 @@ function getAuthContinueBaseUrl(): string {
 }
 
 export async function registerUser(payload: RegisterPayload) {
-  const credential = await createUserWithEmailAndPassword(
-    auth,
-    payload.email.trim(),
-    payload.password
-  );
-  const firebaseUser = credential.user;
-
-  await updateProfile(firebaseUser, {
-    displayName: payload.fullName.trim(),
+  const emailKey = payload.email.trim().toLowerCase();
+  let resolveReg!: () => void;
+  const regPromise = new Promise<void>((resolve) => {
+    resolveReg = resolve;
   });
+  pendingRegistrationsByEmail.set(emailKey, regPromise);
 
-  await initializeUserDocuments(firebaseUser, {
-    fullName: payload.fullName,
-    username: payload.username,
-    communeId: payload.communeId,
-    sectorId: payload.sectorId,
-    accountType: payload.accountType,
-    institutionName: payload.institutionName,
-    institutionDescription: payload.institutionDescription,
-    responsiblePerson: payload.responsiblePerson,
-    institutionalCode: payload.institutionalCode,
-    privatePhone: payload.privatePhone,
-    isMinorSupervised: payload.isMinorSupervised,
-    guardianAuthorizationNote: payload.guardianAuthorizationNote,
-  });
+  try {
+    const credential = await createUserWithEmailAndPassword(
+      auth,
+      payload.email.trim(),
+      payload.password
+    );
+    const firebaseUser = credential.user;
 
-  return { user: firebaseUser };
+    await updateProfile(firebaseUser, {
+      displayName: payload.fullName.trim().slice(0, 120),
+    }).catch(() => {});
+
+    await initializeUserDocuments(firebaseUser, {
+      fullName: payload.fullName,
+      username: payload.username,
+      communeId: payload.communeId,
+      sectorId: payload.sectorId,
+      accountType: payload.accountType,
+      institutionName: payload.institutionName,
+      institutionDescription: payload.institutionDescription,
+      responsiblePerson: payload.responsiblePerson,
+      institutionalCode: payload.institutionalCode,
+      privatePhone: payload.privatePhone,
+      isMinorSupervised: payload.isMinorSupervised,
+      guardianAuthorizationNote: payload.guardianAuthorizationNote,
+    });
+
+    return { user: firebaseUser };
+  } finally {
+    resolveReg();
+    pendingRegistrationsByEmail.delete(emailKey);
+  }
 }
 
 export async function signInUser(email: string, password: string) {
@@ -222,21 +258,37 @@ export async function signInUser(email: string, password: string) {
   return { user: credential.user };
 }
 
-export async function signInWithGoogle(): Promise<User> {
+export async function signInWithGoogle(defaults?: BootstrapProfileDetails): Promise<User> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  const result = await signInWithPopup(auth, provider);
-  void ensureBootstrapProfile(result.user).catch((err) => {
-    console.warn('No se pudo inicializar perfil tras Google login:', err);
-  });
-  return result.user;
+  pendingGoogleDefaults = defaults;
+  try {
+    const result = await signInWithPopup(auth, provider);
+    await ensureBootstrapProfile(result.user, defaults).catch((err) => {
+      console.warn('No se pudo inicializar perfil tras Google login:', err);
+    });
+    return result.user;
+  } finally {
+    pendingGoogleDefaults = undefined;
+  }
 }
 
-export async function ensureBootstrapProfile(firebaseUser: User): Promise<void> {
+export async function ensureBootstrapProfile(
+  firebaseUser: User,
+  defaults?: BootstrapProfileDetails
+): Promise<void> {
+  const emailKey = (firebaseUser.email || '').trim().toLowerCase();
+  const pendingReg = emailKey ? pendingRegistrationsByEmail.get(emailKey) : undefined;
+  if (pendingReg) {
+    await pendingReg;
+  }
+
   const existingPromise = bootstrapInFlight.get(firebaseUser.uid);
   if (existingPromise) {
     return existingPromise;
   }
+
+  const effectiveDefaults = defaults ?? pendingGoogleDefaults;
 
   const task = (async () => {
     const userRef = doc(db, 'users', firebaseUser.uid);
@@ -246,8 +298,14 @@ export async function ensureBootstrapProfile(firebaseUser: User): Promise<void> 
       await initializeUserDocuments(firebaseUser, {
         fullName: firebaseUser.displayName || emailPrefix,
         username: `${emailPrefix}_${firebaseUser.uid.slice(0, 4)}`,
-        communeId: 'castro',
-        accountType: 'individual',
+        communeId: effectiveDefaults?.communeId || 'castro',
+        sectorId: effectiveDefaults?.sectorId,
+        accountType: effectiveDefaults?.accountType || 'individual',
+        institutionName: effectiveDefaults?.institutionName,
+        institutionDescription: effectiveDefaults?.institutionDescription,
+        responsiblePerson: effectiveDefaults?.responsiblePerson,
+        institutionalCode: effectiveDefaults?.institutionalCode,
+        privatePhone: effectiveDefaults?.privatePhone,
       });
     }
   })();
@@ -385,13 +443,32 @@ export async function updateOwnProfile(
     updated_at: serverTimestamp(),
   };
 
+  if (typeof payload.full_name === 'string') {
+    payload.full_name = payload.full_name.trim().slice(0, 120);
+  }
+  if (typeof payload.bio === 'string') {
+    payload.bio = payload.bio.trim().slice(0, 500) || null;
+  }
+  if (typeof payload.institution_name === 'string') {
+    payload.institution_name = payload.institution_name.trim().slice(0, 160) || null;
+  }
+  if (typeof payload.institution_description === 'string') {
+    payload.institution_description = payload.institution_description.trim().slice(0, 500) || null;
+  }
+  if (typeof payload.responsible_person === 'string') {
+    payload.responsible_person = payload.responsible_person.trim().slice(0, 120) || null;
+  }
+  if (typeof payload.institutional_code === 'string') {
+    payload.institutional_code = payload.institutional_code.trim().slice(0, 60) || null;
+  }
+
   if (territorial) {
     if (updates.commune_id !== undefined) {
-      payload.commune_name = territorial.communeName;
-      payload.commune_region = territorial.communeRegion;
+      payload.commune_name = territorial.communeName ? territorial.communeName.slice(0, 100) : null;
+      payload.commune_region = territorial.communeRegion ? territorial.communeRegion.slice(0, 100) : null;
     }
     if (updates.sector_id !== undefined) {
-      payload.sector_name = territorial.sectorName;
+      payload.sector_name = territorial.sectorName ? territorial.sectorName.slice(0, 120) : null;
     }
   }
 
@@ -403,7 +480,7 @@ export async function updateOwnProfile(
         doc(db, 'users', userId, 'private', 'contact'),
         {
           user_id: userId,
-          private_phone: privatePhone || null,
+          private_phone: privatePhone ? privatePhone.trim().slice(0, 40) : null,
           updated_at: serverTimestamp(),
         },
         { merge: true }

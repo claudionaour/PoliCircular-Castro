@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { ShieldAlert, UserPlus } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { registerUser, signInWithGoogle } from '../../services/authService';
 import { listActiveCommunes, listSectorsByCommune } from '../../services/territorialService';
 import { isFirebaseConfigured, translateFirebaseError } from '../../services/firebase';
@@ -13,23 +14,27 @@ import type { Commune, Sector } from '../../types/domain';
 
 const registerSchema = z
   .object({
-    fullName: z.string().min(3, 'Ingresa tu nombre completo.'),
+    fullName: z
+      .string()
+      .min(3, 'Ingresa tu nombre completo.')
+      .max(120, 'Máximo 120 caracteres.'),
     username: z
       .string()
       .min(3, 'Mínimo 3 caracteres.')
+      .max(50, 'Máximo 50 caracteres.')
       .regex(/^[a-zA-Z0-9_.-]+$/, 'Usa solo letras, números, punto o guiones.'),
-    email: z.string().email('Correo electrónico inválido.'),
+    email: z.string().email('Correo electrónico inválido.').max(200, 'Correo demasiado largo.'),
     password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres.'),
     communeId: z.string().min(1, 'Selecciona tu comuna.'),
     sectorId: z.string().optional(),
     accountType: z.enum(['individual', 'organization', 'educational']),
-    institutionName: z.string().optional(),
-    institutionDescription: z.string().optional(),
-    responsiblePerson: z.string().optional(),
-    institutionalCode: z.string().optional(),
-    privatePhone: z.string().optional(),
+    institutionName: z.string().max(160, 'Máximo 160 caracteres.').optional(),
+    institutionDescription: z.string().max(500, 'Máximo 500 caracteres.').optional(),
+    responsiblePerson: z.string().max(120, 'Máximo 120 caracteres.').optional(),
+    institutionalCode: z.string().max(60, 'Máximo 60 caracteres.').optional(),
+    privatePhone: z.string().max(40, 'Máximo 40 caracteres.').optional(),
     isMinorSupervised: z.boolean().optional(),
-    guardianAuthorizationNote: z.string().optional(),
+    guardianAuthorizationNote: z.string().max(240, 'Máximo 240 caracteres.').optional(),
     acceptTerms: z.literal(true, {
       message: 'Debes aceptar los términos y reglas comunitarias.',
     }),
@@ -63,6 +68,7 @@ const registerSchema = z
 type RegisterFormValues = z.infer<typeof registerSchema>;
 
 export const RegisterPage: React.FC = () => {
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
@@ -74,10 +80,12 @@ export const RegisterPage: React.FC = () => {
     watch,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
+      communeId: 'castro',
       accountType: 'individual',
       isMinorSupervised: false,
     },
@@ -164,7 +172,17 @@ export const RegisterPage: React.FC = () => {
     setServerError(null);
     setGoogleBusy(true);
     try {
-      await signInWithGoogle();
+      const values = getValues();
+      await signInWithGoogle({
+        accountType: values.accountType,
+        institutionName: values.institutionName,
+        institutionDescription: values.institutionDescription,
+        responsiblePerson: values.responsiblePerson,
+        institutionalCode: values.institutionalCode,
+        communeId: values.communeId || 'castro',
+        sectorId: values.sectorId || undefined,
+        privatePhone: values.privatePhone,
+      });
       navigate('/perfil', { replace: true });
     } catch (err) {
       setServerError(translateFirebaseError(err));
@@ -172,6 +190,10 @@ export const RegisterPage: React.FC = () => {
       setGoogleBusy(false);
     }
   };
+
+  if (!loading && user && !isSubmitting && !googleBusy) {
+    return <Navigate to="/inicio" replace />;
+  }
 
   const isNativeAndroid = Capacitor.isNativePlatform();
 
@@ -217,6 +239,7 @@ export const RegisterPage: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-200 mb-1.5">Nombre completo</label>
               <input
                 type="text"
+                maxLength={120}
                 {...register('fullName')}
                 placeholder="Ej. Camila Soto"
                 className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3.5 py-2.5 text-sm focus:border-[#FFA94D] focus:outline-none"
@@ -228,6 +251,7 @@ export const RegisterPage: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-200 mb-1.5">Nombre de usuario</label>
               <input
                 type="text"
+                maxLength={50}
                 {...register('username')}
                 placeholder="camila_castro"
                 className="w-full rounded-xl border border-[#2D557F] bg-[#0B1E33] text-white placeholder:text-slate-400 px-3.5 py-2.5 text-sm focus:border-[#FFA94D] focus:outline-none"
@@ -316,6 +340,7 @@ export const RegisterPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    maxLength={160}
                     {...register('institutionName')}
                     className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white placeholder:text-slate-400 px-3 py-2 text-sm"
                     placeholder="Liceo / Junta de Vecinos..."
@@ -330,6 +355,7 @@ export const RegisterPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    maxLength={120}
                     {...register('responsiblePerson')}
                     className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white px-3 py-2 text-sm"
                   />
@@ -345,6 +371,7 @@ export const RegisterPage: React.FC = () => {
                   </label>
                   <input
                     type="tel"
+                    maxLength={40}
                     {...register('privatePhone')}
                     placeholder="+56 9 ..."
                     className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white placeholder:text-slate-400 px-3 py-2 text-sm"
@@ -356,6 +383,7 @@ export const RegisterPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
+                    maxLength={60}
                     {...register('institutionalCode')}
                     className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white px-3 py-2 text-sm"
                   />
@@ -367,6 +395,7 @@ export const RegisterPage: React.FC = () => {
                 </label>
                 <textarea
                   rows={2}
+                  maxLength={500}
                   {...register('institutionDescription')}
                   className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white px-3 py-2 text-sm"
                 />
@@ -395,6 +424,7 @@ export const RegisterPage: React.FC = () => {
                 </div>
                 <input
                   type="text"
+                  maxLength={240}
                   {...register('guardianAuthorizationNote')}
                   placeholder="Nombre del apoderado/docente responsable y curso o establecimiento"
                   className="w-full rounded-xl border border-[#2D557F] bg-[#102C49] text-white placeholder:text-slate-400 px-3 py-2 text-sm"

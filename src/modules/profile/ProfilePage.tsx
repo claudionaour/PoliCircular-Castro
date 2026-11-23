@@ -16,6 +16,7 @@ import { ImageWithFallback } from '../../components/ImageWithFallback';
 
 export const ProfilePage: React.FC = () => {
   const { user, profile, isModerator, refreshProfile, signOut } = useAuth();
+  const [retryingProfile, setRetryingProfile] = useState(false);
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -121,7 +122,40 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
-  if (!profile) return null;
+  if (!profile) {
+    return (
+      <div className="max-w-md mx-auto my-12 rounded-2xl bg-[#102C49] border border-[#244B73] p-6 text-center space-y-4">
+        <p className="font-display font-bold text-white">Cargando información de tu perfil...</p>
+        <p className="text-xs text-slate-300">
+          Si acabas de crear tu cuenta institucional o iniciar sesión, espera un instante o pulsa reintentar.
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            type="button"
+            disabled={retryingProfile}
+            onClick={async () => {
+              setRetryingProfile(true);
+              try {
+                await refreshProfile();
+              } finally {
+                setRetryingProfile(false);
+              }
+            }}
+            className="px-4 py-2 rounded-xl bg-[#F28C28] text-[#0B1E33] text-xs font-bold hover:bg-[#FFA242] disabled:opacity-50"
+          >
+            {retryingProfile ? 'Cargando...' : 'Reintentar carga'}
+          </button>
+          <button
+            type="button"
+            onClick={() => signOut()}
+            className="px-4 py-2 rounded-xl border border-[#3B648F] bg-[#0B1E33] text-xs font-semibold text-white hover:bg-[#163B61]"
+          >
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

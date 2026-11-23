@@ -160,6 +160,21 @@ export function translateFirebaseError(err: unknown): string {
   if (raw.includes('auth/network-request-failed')) {
     return 'Error de red al conectar con Firebase. Verifica tu conexión e inténtalo nuevamente.';
   }
+  if (raw.includes('auth/account-exists-with-different-credential')) {
+    return 'Este correo ya está registrado con otro método de acceso. Inicia sesión con tu correo y contraseña o con el proveedor que usaste al crear la cuenta.';
+  }
+  if (raw.includes('auth/invalid-email')) {
+    return 'El formato del correo electrónico no es válido.';
+  }
+  if (raw.includes('auth/user-disabled')) {
+    return 'Esta cuenta se encuentra deshabilitada. Contacta a administración para revisarla.';
+  }
+  if (raw.includes('auth/admin-restricted-operation')) {
+    return 'Tu dominio institucional restringió este método de acceso. Prueba registrarte o ingresar con correo y contraseña.';
+  }
+  if (raw.includes('auth/web-storage-unsupported')) {
+    return 'Tu navegador bloquea las cookies o el almacenamiento necesarios para iniciar sesión. Habilítalos e inténtalo nuevamente.';
+  }
   if (raw.includes('auth/operation-not-allowed')) {
     return 'El acceso con correo y contraseña aún no está habilitado en Firebase Authentication. Puedes iniciar con Google o habilitar Email/Password en Firebase Console.';
   }
